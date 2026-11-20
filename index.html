@@ -193,7 +193,7 @@ const TASK_RULES=[
 ];
 const RX={
  draftNoPropose:/(haven'?t|have not|hasn'?t|not yet)\s+(yet\s+)?(drafted|proposed|sent|called propose)/,
- drafted:/(up for (your )?approval|up as a card|waiting for your approval|draft is up|proposed the post|proposed (a )?reply)/,
+ drafted:/(waiting (on|for) (your )?approval|ready for (your )?approval|up for (your )?approval|up as a card|waiting for your approval|draft is up|proposed the post|proposed (a )?reply)/,
  stall:/(say the word|if you want me to|i'?ll do both|next turn|task is incomplete|haven'?t (saved|drafted|proposed|sent)|before drafting|since you asked me not to)/,
  skip:/(not posting anything|drafted nothing|drafted 0|nothing (new )?qualif|nothing new|skipped (it|this)|i'?m holding off|no new items)/,
  error:/(rejected|over the length|length limit|returned an error|failed|could not load)/,
@@ -205,17 +205,19 @@ const jac=(a,b)=>{let i=0;a.forEach(x=>{if(b.has(x))i++});const u=a.size+b.size-
 
 function classify(text){
  const s=text.toLowerCase();
+ // task is read from the story itself, not from sentences about notes or memory
+ const body=text.split(/(?<=[.!?])\s+/).filter(x=>!/\b(notes?|memory|lines?|entries|saved|save_memory)\b/i.test(x)).join(' ').toLowerCase()||s;
  const g={task:null,outcome:'drafted',pushes:0,memFail:false,why:''};
  const why=[];
- for(const [name,rx] of TASK_RULES){if(rx.test(s)){g.task=name;break}}
+ for(const [name,rx] of TASK_RULES){if(rx.test(body)){g.task=name;break}}
  const m=k=>{const x=s.match(RX[k]);return x?x[0]:null};
  const dn=m('draftNoPropose'),dr=m('drafted'),st=m('stall'),sk=m('skip'),er=m('error'),me=m('mem'),us=m('unsaved');
  if(dr&&!dn){g.outcome='drafted';why.push('draft card: "'+dr+'"')}
  else if(dn||st){g.outcome='drafted';g.pushes=1;why.push('stalled: "'+(dn||st)+'"')}
  else if(sk){g.outcome='skipped';why.push('skip: "'+sk+'"')}
  else why.push('no clear phrase, check the outcome');
- if(er){why.push('error: "'+er+'"');if(!dr&&!sk)g.outcome='error'}
- if(us&&!g.pushes&&g.outcome!=='skipped'){g.pushes=1;why.push('save step not done: "'+us+'"')}
+ if(er){if(dr||sk){why.push('error seen but it recovered: "'+er+'"')}else{why.push('error: "'+er+'"');g.outcome='error'}}
+ if(us&&!g.pushes&&g.outcome==='drafted'){g.pushes=1;why.push('save step not done: "'+us+'"')}
  if(me){g.memFail=true;why.push('memory: "'+me+'"')}
  // learn from runs the user corrected before
  const gs=grams(text);let best=0,hit=null;
