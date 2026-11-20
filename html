@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0f1115">
+<title>Metrik Runs</title>
+<style>
+:root{--bg:#0f1115;--card:#181b22;--line:#272b35;--tx:#e8eaf0;--mut:#8b91a0;--acc:#4f8cff;--ok:#3ecf8e;--warn:#f5a524;--bad:#ef5350}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.wrap{max-width:640px;margin:0 auto;padding:0 16px 90px}
+header{position:sticky;top:0;background:var(--bg);padding:14px 0 10px;z-index:5;border-bottom:1px solid var(--line)}
+h1{font-size:18px;margin:0 0 10px}
+nav{display:flex;gap:6px}
+nav button{flex:1;min-height:42px;border:1px solid var(--line);background:var(--card);color:var(--mut);border-radius:10px;font-size:15px}
+nav button.on{color:var(--tx);border-color:var(--acc);background:#1b2433}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin:12px 0}
+label{display:block;color:var(--mut);font-size:13px;margin:12px 0 6px}
+textarea,input,select{width:100%;background:#0f1218;color:var(--tx);border:1px solid var(--line);border-radius:10px;padding:11px;font:inherit;min-height:44px}
+textarea{min-height:130px;resize:vertical}
+.seg{display:flex;gap:6px;flex-wrap:wrap}
+.seg button,.btn{min-height:44px;padding:0 14px;border:1px solid var(--line);background:#0f1218;color:var(--tx);border-radius:10px;font-size:15px}
+.seg button.on{border-color:var(--acc);background:#1b2433}
+.seg button.on.ok{border-color:var(--ok);background:#12281f}
+.seg button.on.bad{border-color:var(--bad);background:#2b1717}
+.primary{width:100%;min-height:50px;margin-top:16px;border:0;border-radius:12px;background:var(--acc);color:#fff;font-size:17px;font-weight:600}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.mut{color:var(--mut);font-size:14px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.chip{font-size:13px;padding:3px 9px;border-radius:99px;border:1px solid var(--line);color:var(--mut)}
+.chip.ok{color:var(--ok);border-color:#1f4a38}.chip.bad{color:var(--bad);border-color:#5a2626}.chip.warn{color:var(--warn);border-color:#5a4318}
+.banner{border:1px solid #5a4318;background:#241d0f;color:var(--warn);border-radius:12px;padding:10px 12px;margin:12px 0;font-size:14px}
+.stat{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}
+.stat div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px;text-align:center}
+.stat b{display:block;font-size:22px}
+.stat span{font-size:12px;color:var(--mut)}
+.tip{margin-top:10px;font-size:14px;color:#cdd3e0;border-left:3px solid var(--acc);padding-left:10px}
+.stepper{display:flex;align-items:center;gap:12px}
+.stepper b{min-width:28px;text-align:center;font-size:20px}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#222833;border:1px solid var(--line);padding:10px 16px;border-radius:10px;font-size:14px;z-index:9}
+small{color:var(--mut)}
+.x{background:none;border:0;color:var(--mut);font-size:13px;padding:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header><h1>Metrik Runs</h1><nav id="tabs"></nav></header>
+<main id="app"></main>
+</div>
+<input type="file" id="file" accept=".json,application/json" hidden>
+<script>
+const KEY='metrik-runs-v1';
+const DAY=864e5;
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+const T=iso=>new Date(iso).getTime();
+
+const DEFAULT_TASKS=[
+ {n:'LUKSO Update',d:1},{n:'Hup this week',d:7},{n:'Reply to my notifications',d:1},
+ {n:'Football weekly',d:7},{n:'Football hot topic',d:1},{n:'Big match special',d:0},
+ {n:'Community question',d:7},{n:'Creator spotlight',d:7},{n:'AI and science',d:0}
+];
+
+function seed(){
+ const r=(iso,task,outcome,pushes,result,extra)=>Object.assign({id:uid(),ts:T(iso),task,outcome,pushes,result,wrongSkip:false,memFail:false,note:''},extra||{});
+ return{
+  tasks:JSON.parse(JSON.stringify(DEFAULT_TASKS)),lastExport:null,
+  runs:[
+   r('2026-11-17T13:52:00+01:00','Hup this week','drafted',2,'discarded',{note:'Ignored the one-trending-post rule. Draft discarded, too soon after 15 Nov.'}),
+   r('2026-11-17T21:58:00+01:00','LUKSO Update','skipped',0,'none',{wrongSkip:true,note:'Missed Updates #11-#13 and Predict v2.'}),
+   r('2026-11-17T23:19:00+01:00','LUKSO Update','drafted',3,'edited',{note:'Length error once. Predict line added by hand.'}),
+   r('2026-11-18T12:05:00+01:00','LUKSO Update','skipped',0,'none',{note:'Correct skip: security incident, not verifiable from its sources.'}),
+   r('2026-11-18T23:00:00+01:00','LUKSO Update','drafted',0,'approved',{note:'Post mortem. Time and task approximate.'}),
+   r('2026-11-19T23:32:00+01:00','LUKSO Update','drafted',1,'edited',{note:'Mini Radio and Ethereum stocks added by hand.'}),
+   r('2026-11-20T00:03:00+01:00','Reply to my notifications','skipped',0,'none',{note:'Correct skip: comment had no question or fact.'})
+  ]
+ };
+}
+function load(){
+ try{const raw=localStorage.getItem(KEY);if(raw){const s=JSON.parse(raw);if(s&&Array.isArray(s.runs)&&Array.isArray(s.tasks))return s}}catch(e){}
+ return seed();
+}
+let S=load();
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('Browser storage blocked. Export a backup now.')}}
+function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2200)}
+
+/* ---------- classifier ---------- */
+const TASK_RULES=[
+ ['Hup this week',/platform totals|root posts|nft feed|trending list|hup weekly/],
+ ['LUKSO Update',/update #\d+|luksonews|lukso update|lyx is at|lyx price|read_prices/],
+ ['Reply to my notifications',/comment|replied|reply to|notifications|propose_reply/],
+ ['Big match special',/derby|cl[aá]sico|title clash|relegation|knockout/],
+ ['Football weekly',/football weekly|weekly football/],
+ ['Football hot topic',/bbc sport|sky sports|premier league|champions league|hot topic/],
+ ['Community question',/community question/],
+ ['Creator spotlight',/spotlight/],
+ ['AI and science',/\bscience\b|\bai news\b/]
+];
+const RX={
+ draftNoPropose:/(haven'?t|have not|hasn'?t|not yet)\s+(yet\s+)?(drafted|proposed|sent|called propose)/,
+ drafted:/(up for (your )?approval|up as a card|waiting for your approval|draft is up|proposed the post|proposed (a )?reply)/,
+ stall:/(say the word|if you want me to|i'?ll do both|next turn|task is incomplete|haven'?t (saved|drafted|proposed|sent)|before drafting|since you asked me not to)/,
+ skip:/(not posting anything|drafted nothing|drafted 0|nothing (new )?qualif|nothing new|skipped (it|this)|i'?m holding off|no new items)/,
+ error:/(rejected|over the length|length limit|returned an error|failed|could not load)/,
+ mem:/(memory not saved|couldn'?t save|save_memory failed|failed to save)/,
+ unsaved:/(not saved yet|aren'?t saved yet|haven'?t saved|hasn'?t been saved)/
+};
+const grams=t=>{const w=t.toLowerCase().replace(/[^a-z0-9' ]/g,' ').split(/\s+/).filter(Boolean);const s=new Set();for(let i=0;i<w.length-1;i++)s.add(w[i]+' '+w[i+1]);return s};
+const jac=(a,b)=>{let i=0;a.forEach(x=>{if(b.has(x))i++});const u=a.size+b.size-i;return u?i/u:0};
+
+function classify(text){
+ const s=text.toLowerCase();
+ const g={task:null,outcome:'drafted',pushes:0,memFail:false,why:''};
+ const why=[];
+ for(const [name,rx] of TASK_RULES){if(rx.test(s)){g.task=name;break}}
+ const m=k=>{const x=s.match(RX[k]);return x?x[0]:null};
+ const dn=m('draftNoPropose'),dr=m('drafted'),st=m('stall'),sk=m('skip'),er=m('error'),me=m('mem'),us=m('unsaved');
+ if(dr&&!dn){g.outcome='drafted';why.push('draft card: "'+dr+'"')}
+ else if(dn||st){g.outcome='drafted';g.pushes=1;why.push('stalled: "'+(dn||st)+'"')}
+ else if(sk){g.outcome='skipped';why.push('skip: "'+sk+'"')}
+ else why.push('no clear phrase, check the outcome');
+ if(er){why.push('error: "'+er+'"');if(!dr&&!sk)g.outcome='error'}
+ if(us&&!g.pushes&&g.outcome!=='skipped'){g.pushes=1;why.push('save step not done: "'+us+'"')}
+ if(me){g.memFail=true;why.push('memory: "'+me+'"')}
+ // learn from runs the user corrected before
+ const gs=grams(text);let best=0,hit=null;
+ S.runs.forEach(r=>{if(r.corrected&&r.text){const j=jac(gs,grams(r.text));if(j>best){best=j;hit=r}}});
+ if(hit&&best>=0.45){g.task=hit.task;g.outcome=hit.outcome;g.pushes=hit.pushes>0?1:0;why.unshift('matches a run you corrected on '+new Date(hit.ts).toLocaleDateString())}
+ g.why=why.join(' · ');
+ return g;
+}
+
+/* ---------- state ---------- */
+let view='log',win=14,tm=null;
+let draft=newDraft();
+function newDraft(){return{ts:Date.now(),task:'',outcome:'drafted',pushes:0,result:'pending',wrongSkip:false,memFail:false,note:'',text:'',guess:null,why:''}}
+function applyGuess(){
+ if(!draft.text.trim()){draft.guess=null;draft.why='';return}
+ const g=classify(draft.text);draft.guess=g;
+ if(g.task)draft.task=g.task;
+ draft.outcome=g.outcome;draft.pushes=g.pushes;draft.memFail=g.memFail;draft.why=g.why;
+ draft.result=g.outcome==='drafted'?'pending':'none';
+}
+
+/* ---------- helpers ---------- */
+const fmt=ts=>new Date(ts).toLocaleString([], {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+const localVal=ts=>{const d=new Date(ts);d.setMinutes(d.getMinutes()-d.getTimezoneOffset());return d.toISOString().slice(0,16)};
+const isClean=r=>r.pushes===0&&!r.wrongSkip&&!r.memFail&&r.outcome!=='error';
+function seg(field,opts,val,cls){return '<div class="seg">'+opts.map(([v,l,c])=>`<button class="${val===v?'on '+(c||''):''}" data-a="set:${field}:${v}">${l}</button>`).join('')+'</div>'}
+function overdue(){
+ const out=[],now=Date.now();
+ S.tasks.forEach(t=>{
+  if(!t.d)return;
+  const mine=S.runs.filter(r=>r.task===t.n);
+  if(!mine.length)return;
+  const last=Math.max(...mine.map(r=>r.ts)),days=(now-last)/DAY;
+  if(days>t.d*1.5)out.push({n:t.n,days:Math.floor(days)});
+ });
+ return out;
+}
+
+/* ---------- views ---------- */
+function render(){
+ $('#tabs').innerHTML=[['log','Log'],['health','Health'],['history','History'],['setup','Setup']]
+  .map(([k,l])=>`<button data-a="tab:${k}" class="${view===k?'on':''}">${l}</button>`).join('');
+ ({log:rLog,health:rHealth,history:rHistory,setup:rSetup})[view]();
+}
+function rLog(){
+ let b='';
+ const od=overdue();
+ if(od.length)b+=`<div class="banner">Nothing logged lately: ${od.map(o=>esc(o.n)+' ('+o.days+'d)').join(', ')}</div>`;
+ const age=S.lastExport?(Date.now()-S.lastExport)/DAY:null;
+ if(S.runs.length&&(age===null||age>7))b+=`<div class="banner">No backup in ${age===null?'a while':Math.floor(age)+' days'}. Setup, then Export.</div>`;
+ $('#app').innerHTML=b+`<div class="card"><label style="margin-top:0">Paste Metrik's reply</label><textarea id="paste" placeholder="Long-press, paste. It reads the rest."></textarea></div><div id="panel"></div>`;
+ $('#paste').value=draft.text;
+ rPanel();
+}
+function rPanel(){
+ const el=$('#panel');if(!el)return;
+ const taskOpts='<option value="">Pick a task</option>'+S.tasks.map(t=>`<option ${t.n===draft.task?'selected':''}>${esc(t.n)}</option>`).join('');
+ el.innerHTML=`<div class="card">
+ ${draft.why?`<p class="mut" style="margin:0">Read: ${esc(draft.why)}</p>`:''}
+ <label>Task</label><select id="taskSel">${taskOpts}</select>
+ <label>Outcome</label>${seg('outcome',[['drafted','Drafted'],['skipped','Skipped'],['error','Error','bad']],draft.outcome)}
+ <label>Pushes I had to send</label>
+ <div class="stepper"><button class="btn" data-a="push:-1">−</button><b>${draft.pushes}</b><button class="btn" data-a="push:1">+</button></div>
+ ${draft.outcome==='drafted'?`<label>What I did with the draft</label>${seg('result',[['pending','Not yet'],['approved','Approved','ok'],['edited','Edited'],['discarded','Discarded','bad']],draft.result)}`:''}
+ ${draft.outcome==='skipped'?`<label>Was the skip right?</label>${seg('wrongSkip',[['false','Right','ok'],['true','Wrong','bad']],String(draft.wrongSkip))}`:''}
+ <label>Memory save failed?</label>${seg('memFail',[['false','No'],['true','Yes','bad']],String(draft.memFail))}
+ <label>When</label><input type="datetime-local" id="when" value="${localVal(draft.ts)}">
+ <label>Note (optional)</label><input id="note" value="${esc(draft.note)}" placeholder="e.g. ignored the 350 limit">
+ <button class="primary" data-a="save">Save run</button></div>`;
+}
+function inWin(r){return win===0||r.ts>=Date.now()-win*DAY}
+function agg(runs){
+ const n=runs.length,drafts=runs.filter(r=>r.outcome==='drafted');
+ return{n,
+  clean:runs.filter(isClean).length,
+  pushes:runs.reduce((a,r)=>a+r.pushes,0),
+  stalled:runs.filter(r=>r.pushes>0).length,
+  wrong:runs.filter(r=>r.wrongSkip).length,
+  mem:runs.filter(r=>r.memFail).length,
+  err:runs.filter(r=>r.outcome==='error').length,
+  drafts:drafts.length,
+  disc:drafts.filter(r=>r.result==='discarded').length,
+  edited:drafts.filter(r=>r.result==='edited').length,
+  pend:drafts.filter(r=>r.result==='pending').length};
+}
+function tips(a){
+ const t=[];
+ if(a.n>=2&&a.stalled/a.n>=0.5)t.push(`Stalls in ${a.stalled} of ${a.n} runs. Fewer steps, one tool call per step, exact tool names. Test in a New chat.`);
+ if(a.wrong)t.push('Wrong skip. Add a step that makes it list the items it checked before it decides to skip.');
+ if(a.drafts>=2&&a.disc/a.drafts>=0.4)t.push('Many drafts discarded. Compare them with the rule they broke and put that rule into the task text.');
+ if(a.drafts>=2&&a.edited/a.drafts>=0.5)t.push('Most drafts need hand edits. Note what you change each time. A repeat edit is a missing rule.');
+ if(a.mem)t.push('Memory saves failed. Check MEMORY.md against the 12-line cap.');
+ if(!t.length&&a.n>=3&&a.clean/a.n>=0.8)t.push('Healthy.');
+ return t;
+}
+function rHealth(){
+ const runs=S.runs.filter(inWin),a=agg(runs);
+ const winBtns=[[7,'7d'],[14,'14d'],[30,'30d'],[0,'All']].map(([v,l])=>`<button class="${win===v?'on':''}" data-a="win:${v}">${l}</button>`).join('');
+ let h=`<div class="card"><div class="seg">${winBtns}</div></div>
+ <div class="stat"><div><b>${a.n}</b><span>runs</span></div><div><b>${a.n?Math.round(a.clean/a.n*100):0}%</b><span>clean</span></div><div><b>${a.pushes}</b><span>pushes</span></div></div>`;
+ const od=overdue();
+ if(od.length)h+=`<div class="banner">Overdue: ${od.map(o=>esc(o.n)+' ('+o.days+'d since last log)').join(', ')}</div>`;
+ const names=[...new Set(runs.map(r=>r.task))];
+ names.forEach(n=>{
+  const x=agg(runs.filter(r=>r.task===n)),tp=tips(x);
+  const chip=(txt,c)=>`<span class="chip ${c||''}">${txt}</span>`;
+  h+=`<div class="card"><div class="row"><b>${esc(n)}</b><span class="mut">${x.n} run${x.n>1?'s':''}</span></div><div class="chips">
+  ${chip('clean '+x.clean+'/'+x.n,x.clean===x.n?'ok':'')}
+  ${x.pushes?chip(x.pushes+' push'+(x.pushes>1?'es':''),'warn'):''}
+  ${x.wrong?chip(x.wrong+' wrong skip','bad'):''}
+  ${x.disc?chip(x.disc+' discarded','bad'):''}
+  ${x.edited?chip(x.edited+' edited','warn'):''}
+  ${x.pend?chip(x.pend+' draft not resolved'):''}
+  ${x.mem?chip(x.mem+' memory fail','bad'):''}
+  ${x.err?chip(x.err+' error','bad'):''}
+  </div>${tp.map(t=>`<div class="tip">${esc(t)}</div>`).join('')}</div>`;
+ });
+ if(!names.length)h+='<div class="card mut">No runs in this window.</div>';
+ h+='<p class="mut">Pointers, not diagnosis. They come from counts only.</p>';
+ $('#app').innerHTML=h;
+}
+function rHistory(){
+ const rows=[...S.runs].sort((a,b)=>b.ts-a.ts);
+ let h='';
+ rows.forEach(r=>{
+  const chips=[];
+  if(r.pushes)chips.push(`<span class="chip warn">${r.pushes} push${r.pushes>1?'es':''}</span>`);
+  if(r.wrongSkip)chips.push('<span class="chip bad">wrong skip</span>');
+  if(r.memFail)chips.push('<span class="chip bad">memory fail</span>');
+  if(r.outcome==='error')chips.push('<span class="chip bad">error</span>');
+  if(r.outcome==='skipped'&&!r.wrongSkip)chips.push('<span class="chip">skipped</span>');
+  if(r.outcome==='drafted')chips.push(`<span class="chip ${r.result==='approved'?'ok':r.result==='discarded'?'bad':r.result==='edited'?'warn':''}">${r.result==='pending'?'draft not resolved':r.result}</span>`);
+  h+=`<div class="card"><div class="row"><b>${esc(r.task)}</b><span class="mut">${fmt(r.ts)}</span></div>
+  <div class="chips">${chips.join('')}</div>
+  ${r.note?`<p class="mut" style="margin:8px 0 0">${esc(r.note)}</p>`:''}
+  ${r.outcome==='drafted'&&r.result==='pending'?`<div class="seg" style="margin-top:10px"><button data-a="res:${r.id}:approved">Approved</button><button data-a="res:${r.id}:edited">Edited</button><button data-a="res:${r.id}:discarded">Discarded</button></div>`:''}
+  <button class="x" data-a="del:${r.id}">Delete</button></div>`;
+ });
+ $('#app').innerHTML=h||'<div class="card mut">Nothing logged yet.</div>';
+}
+function rSetup(){
+ const learned=S.runs.filter(r=>r.corrected).length;
+ $('#app').innerHTML=`<div class="card"><b>Tasks</b><p class="mut" style="margin:4px 0 0">Days between runs. 0 means no schedule, so no overdue alert.</p>
+ ${S.tasks.map((t,i)=>`<div class="row" style="margin-top:10px;gap:8px"><input data-t="n:${i}" value="${esc(t.n)}"><input data-t="d:${i}" type="number" min="0" value="${t.d}" style="width:78px"><button class="x" data-a="deltask:${i}">✕</button></div>`).join('')}
+ <button class="btn" style="margin-top:12px" data-a="addtask">Add task</button></div>
+ <div class="card"><b>Backup</b><p class="mut" style="margin:4px 0 10px">Your data lives only in this browser. Export to a file and keep it in Drive or email it to yourself.</p>
+ <div class="seg"><button data-a="export">Export file</button><button data-a="copy">Copy as text</button><button data-a="import">Import file</button></div>
+ <p class="mut" style="margin:10px 0 0">Last export: ${S.lastExport?new Date(S.lastExport).toLocaleString():'never'}</p></div>
+ <div class="card"><b>Learning</b><p class="mut" style="margin:4px 0 0">${learned} corrected run${learned===1?'':'s'} stored. When you fix a guess, the app remembers that reply and matches similar ones next time.</p>
+ <button class="x" style="margin-top:8px" data-a="reset">Erase everything</button></div>`;
+}
+
+/* ---------- events ---------- */
+document.addEventListener('click',e=>{
+ const b=e.target.closest('[data-a]');if(!b)return;
+ const [a,x,y]=b.dataset.a.split(':');
+ if(a==='tab'){view=x;render()}
+ else if(a==='set'){
+  if(x==='wrongSkip'||x==='memFail')draft[x]=(y==='true');
+  else{draft[x]=y;if(x==='outcome'){draft.result=y==='drafted'?'pending':'none';if(y!=='skipped')draft.wrongSkip=false}}
+  rPanel();
+ }
+ else if(a==='push'){draft.pushes=Math.max(0,draft.pushes+Number(x));rPanel()}
+ else if(a==='save')saveRun();
+ else if(a==='win'){win=Number(x);rHealth()}
+ else if(a==='res'){const r=S.runs.find(r=>r.id===x);if(r){r.result=y;save();rHistory()}}
+ else if(a==='del'){if(confirm('Delete this run?')){S.runs=S.runs.filter(r=>r.id!==x);save();rHistory()}}
+ else if(a==='addtask'){S.tasks.push({n:'New task',d:0});save();rSetup()}
+ else if(a==='deltask'){S.tasks.splice(Number(x),1);save();rSetup()}
+ else if(a==='export')doExport();
+ else if(a==='copy'){const t=JSON.stringify(S);(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{S.lastExport=Date.now();save();toast('Copied');rSetup()}).catch(()=>toast('Copy blocked. Use Export file.'))}
+ else if(a==='import')$('#file').click();
+ else if(a==='reset'){if(confirm('Erase all runs and tasks? Export first.')){S={tasks:JSON.parse(JSON.stringify(DEFAULT_TASKS)),runs:[],lastExport:null};save();rSetup()}}
+});
+document.addEventListener('input',e=>{
+ const id=e.target.id;
+ if(id==='paste'){clearTimeout(tm);tm=setTimeout(()=>{draft.text=e.target.value;applyGuess();rPanel()},350)}
+ else if(id==='note')draft.note=e.target.value;
+});
+document.addEventListener('change',e=>{
+ const id=e.target.id;
+ if(id==='taskSel')draft.task=e.target.value;
+ else if(id==='when'){const t=new Date(e.target.value).getTime();if(!isNaN(t))draft.ts=t}
+ else if(e.target.dataset&&e.target.dataset.t){
+  const [f,i]=e.target.dataset.t.split(':'),t=S.tasks[Number(i)];
+  if(t){const old=t.n;if(f==='n'){t.n=e.target.value.trim()||old;S.runs.forEach(r=>{if(r.task===old)r.task=t.n})}else t.d=Math.max(0,Number(e.target.value)||0);save()}
+ }
+ else if(id==='file'){
+  const f=e.target.files[0];if(!f)return;
+  const rd=new FileReader();
+  rd.onload=()=>{try{
+   const d=JSON.parse(rd.result);if(!d||!Array.isArray(d.runs))throw 0;
+   const have=new Set(S.runs.map(r=>r.id));let add=0;
+   d.runs.forEach(r=>{if(r&&r.id&&!have.has(r.id)){S.runs.push(r);add++}});
+   if(Array.isArray(d.tasks))d.tasks.forEach(t=>{if(t&&t.n&&!S.tasks.some(x=>x.n===t.n))S.tasks.push(t)});
+   save();toast('Imported '+add+' runs');render();
+  }catch(err){toast('That file is not a Metrik Runs backup')}e.target.value=''};
+  rd.readAsText(f);
+ }
+});
+function saveRun(){
+ if(!draft.task){toast('Pick a task first');return}
+ const g=draft.guess;
+ const corrected=!!(g&&draft.text&&(g.task!==draft.task||g.outcome!==draft.outcome||(g.pushes>0)!==(draft.pushes>0)));
+ const r={id:uid(),ts:draft.ts,task:draft.task,outcome:draft.outcome,pushes:draft.pushes,
+  result:draft.outcome==='drafted'?draft.result:'none',
+  wrongSkip:draft.outcome==='skipped'&&draft.wrongSkip,memFail:draft.memFail,note:draft.note.trim()};
+ if(corrected){r.corrected=true;r.text=draft.text.slice(0,600)}
+ S.runs.push(r);save();draft=newDraft();toast('Saved');render();
+}
+function doExport(){
+ try{
+  const blob=new Blob([JSON.stringify(S,null,1)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='metrik-runs-'+new Date().toISOString().slice(0,10)+'.json';
+  document.body.appendChild(a);a.click();a.remove();
+  S.lastExport=Date.now();save();rSetup();
+ }catch(e){toast('Export blocked. Use Copy as text.')}
+}
+save();render();
+</script>
+</body>
+</html>
