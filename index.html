@@ -58,7 +58,7 @@ const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const T=iso=>new Date(iso).getTime();
 
 const DEFAULT_TASKS=[
- {n:'LUKSO Update',d:1},{n:'Hup this week',d:7},{n:'Reply to my notifications',d:1},
+ {n:'LUKSO Update',d:1},{n:'Hup this week',d:7},{n:'Reply to my notifications',d:1},{n:'Join conversation',d:0},
  {n:'Football weekly',d:7},{n:'Football hot topic',d:1},{n:'Big match special',d:0},
  {n:'Community question',d:7},{n:'Creator spotlight',d:7},{n:'AI and science',d:0}
 ];
@@ -83,6 +83,8 @@ function load(){
  return seed();
 }
 let S=load();
+if(!S.tasks.some(t=>t.n==='Join conversation')){S.tasks.splice(3,0,{n:'Join conversation',d:0})}
+let editIdx=-1;
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('Browser storage blocked. Export a backup now.')}}
 function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2200)}
 
@@ -266,7 +268,7 @@ function rHistory(){
 function rSetup(){
  const learned=S.runs.filter(r=>r.corrected).length;
  $('#app').innerHTML=`<div class="card"><b>Tasks</b><p class="mut" style="margin:4px 0 0">Days between runs. 0 means no schedule, so no overdue alert.</p>
- ${S.tasks.map((t,i)=>`<div class="row" style="margin-top:10px;gap:8px"><input data-t="n:${i}" value="${esc(t.n)}"><input data-t="d:${i}" type="number" min="0" value="${t.d}" style="width:78px"><button class="x" data-a="deltask:${i}">✕</button></div>`).join('')}
+ ${S.tasks.map((t,i)=>i===editIdx?`<div style="margin-top:10px;border:1px solid var(--acc);border-radius:12px;padding:10px"><input id="en" value="${esc(t.n)}"><div class="row" style="margin-top:8px;gap:8px"><input id="ed" type="number" min="0" value="${t.d}" style="width:90px"><span class="mut">days between runs</span></div><div class="seg" style="margin-top:10px"><button class="on ok" data-a="tsave:${i}">Save</button><button data-a="tcancel">Cancel</button><button data-a="deltask:${i}" style="margin-left:auto;color:var(--bad)">Delete</button></div></div>`:`<div class="row" style="margin-top:10px;gap:8px"><div><b>${esc(t.n)}</b><div class="mut">${t.d?'every '+t.d+(t.d===1?' day':' days'):'no schedule'}</div></div><button class="btn" data-a="tedit:${i}">Edit</button></div>`).join('')}
  <button class="btn" style="margin-top:12px" data-a="addtask">Add task</button></div>
  <div class="card"><b>Backup</b><p class="mut" style="margin:4px 0 10px">Your data lives only in this browser. Export to a file and keep it in Drive or email it to yourself.</p>
  <div class="seg"><button data-a="export">Export file</button><button data-a="copy">Copy as text</button><button data-a="import">Import file</button></div>
@@ -290,8 +292,13 @@ document.addEventListener('click',e=>{
  else if(a==='win'){win=Number(x);rHealth()}
  else if(a==='res'){const r=S.runs.find(r=>r.id===x);if(r){r.result=y;save();rHistory()}}
  else if(a==='del'){if(confirm('Delete this run?')){S.runs=S.runs.filter(r=>r.id!==x);save();rHistory()}}
- else if(a==='addtask'){S.tasks.push({n:'New task',d:0});save();rSetup()}
- else if(a==='deltask'){S.tasks.splice(Number(x),1);save();rSetup()}
+ else if(a==='addtask'){S.tasks.push({n:'New task',d:0});editIdx=S.tasks.length-1;save();rSetup()}
+ else if(a==='tedit'){editIdx=Number(x);rSetup()}
+ else if(a==='tcancel'){editIdx=-1;rSetup()}
+ else if(a==='tsave'){const t=S.tasks[Number(x)],nn=($('#en').value||'').trim(),old=t.n;if(!nn){toast('Name needed');return}
+  if(S.tasks.some((o,j)=>j!==Number(x)&&o.n===nn)){toast('Name already used');return}
+  t.n=nn;t.d=Math.max(0,Number($('#ed').value)||0);S.runs.forEach(r=>{if(r.task===old)r.task=nn});editIdx=-1;save();toast('Saved');rSetup()}
+ else if(a==='deltask'){if(confirm('Delete this task? Logged runs stay.')){S.tasks.splice(Number(x),1);editIdx=-1;save();rSetup()}}
  else if(a==='export')doExport();
  else if(a==='copy'){const t=JSON.stringify(S);(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{S.lastExport=Date.now();save();toast('Copied');rSetup()}).catch(()=>toast('Copy blocked. Use Export file.'))}
  else if(a==='import')$('#file').click();
@@ -306,10 +313,6 @@ document.addEventListener('change',e=>{
  const id=e.target.id;
  if(id==='taskSel')draft.task=e.target.value;
  else if(id==='when'){const t=new Date(e.target.value).getTime();if(!isNaN(t))draft.ts=t}
- else if(e.target.dataset&&e.target.dataset.t){
-  const [f,i]=e.target.dataset.t.split(':'),t=S.tasks[Number(i)];
-  if(t){const old=t.n;if(f==='n'){t.n=e.target.value.trim()||old;S.runs.forEach(r=>{if(r.task===old)r.task=t.n})}else t.d=Math.max(0,Number(e.target.value)||0);save()}
- }
  else if(id==='file'){
   const f=e.target.files[0];if(!f)return;
   const rd=new FileReader();
