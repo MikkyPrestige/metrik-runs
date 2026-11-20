@@ -45,7 +45,7 @@ small{color:var(--mut)}
 </head>
 <body>
 <div class="wrap">
-<header><h1>Metrik Runs</h1><nav id="tabs"></nav></header>
+<header><div class="row"><h1>Metrik Runs</h1><span id="sync" class="mut" style="font-size:12px"></span></div><nav id="tabs"></nav></header>
 <main id="app"></main>
 </div>
 <input type="file" id="file" accept=".json,application/json" hidden>
@@ -78,14 +78,105 @@ function seed(){
   ]
  };
 }
+const SKEY='metrik-sync-v1';
+function loadCfg(){try{const c=JSON.parse(localStorage.getItem(SKEY)||'null');if(c&&c.repo&&c.token)return c}catch(e){}return null}
+let cfg=loadCfg();
 function load(){
  try{const raw=localStorage.getItem(KEY);if(raw){const s=JSON.parse(raw);if(s&&Array.isArray(s.runs)&&Array.isArray(s.tasks))return s}}catch(e){}
+ if(cfg)return{tasks:JSON.parse(JSON.stringify(DEFAULT_TASKS)),runs:[],lastExport:null};
  return seed();
 }
 let S=load();
+S.deleted=S.deleted||{};S.tu=S.tu||0;
 if(!S.tasks.some(t=>t.n==='Join conversation')){S.tasks.splice(3,0,{n:'Join conversation',d:0})}
 let editIdx=-1;
-function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('Browser storage blocked. Export a backup now.')}}
+function persist(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('Browser storage blocked. Export a backup now.')}}
+function save(){persist();schedulePush()}
+
+/* ---------- GitHub sync ---------- */
+const FILE='metrik-runs-data.json';
+let syncBusy=false,syncAgain=false,syncTm=null,syncMsg='',lastSync=null,syncErr=false;
+const runKey=r=>r.ts+'|'+r.task;
+function payload(s){return{tasks:s.tasks,runs:s.runs,deleted:s.deleted||{},tu:s.tu||0}}
+function mergeState(a,b){
+ const out={tasks:a.tasks,runs:[],deleted:Object.assign({},a.deleted||{}),tu:a.tu||0,lastExport:a.lastExport||null};
+ Object.entries(b.deleted||{}).forEach(([k,v])=>{out.deleted[k]=Math.max(out.deleted[k]||0,v)});
+ if((b.tu||0)>(a.tu||0)&&Array.isArray(b.tasks)){out.tasks=b.tasks;out.tu=b.tu}
+ const byId=new Map();
+ [].concat(a.runs||[],b.runs||[]).forEach(r=>{if(!r||!r.id)return;const o=byId.get(r.id);if(!o||(r.u||0)>(o.u||0))byId.set(r.id,r)});
+ const byKey=new Map();
+ byId.forEach(r=>{
+  if((out.deleted[r.id]||0)>=(r.u||0)&&out.deleted[r.id])return;
+  const k=runKey(r),o=byKey.get(k);
+  if(!o||(r.u||0)>(o.u||0))byKey.set(k,r);
+ });
+ out.runs=[...byKey.values()];
+ return out;
+}
+const b64e=s=>btoa(unescape(encodeURIComponent(s)));
+const b64d=s=>decodeURIComponent(escape(atob(s.replace(/\s/g,''))));
+async function gh(method,path,body){
+ const r=await fetch('https://api.github.com/repos/'+cfg.repo+path,{method,cache:'no-store',
+  headers:{'Authorization':'Bearer '+cfg.token,'Accept':'application/vnd.github+json'},
+  body:body?JSON.stringify(body):undefined});
+ let j=null;try{j=await r.json()}catch(e){}
+ return{status:r.status,json:j};
+}
+function setStatus(m,err){syncMsg=m;syncErr=!!err;const el=$('#sync');if(el){el.textContent=m;el.style.color=err?'var(--bad)':''}}
+function refreshStatus(){
+ if(!cfg){setStatus('Local only');return}
+ if(syncBusy)return setStatus('Syncing…');
+ if(syncErr)return setStatus(syncMsg,true);
+ setStatus(lastSync?'Synced '+new Date(lastSync).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'Not synced yet');
+}
+function schedulePush(){if(!cfg)return;clearTimeout(syncTm);syncTm=setTimeout(()=>sync(),1200)}
+async function sync(){
+ if(!cfg)return false;
+ if(syncBusy){syncAgain=true;return false}
+ syncBusy=true;syncErr=false;setStatus('Syncing…');
+ let ok=false,changedLocal=false;
+ try{
+  for(let attempt=0;attempt<3;attempt++){
+   const g=await gh('GET','/contents/'+FILE);
+   let remote=null,sha;
+   if(g.status===200&&g.json&&g.json.content){remote=JSON.parse(b64d(g.json.content));sha=g.json.sha}
+   else if(g.status===404){
+    const rp=await gh('GET','');
+    if(rp.status!==200)throw new Error(rp.status===404?'Repo not found, or the token has no access to it':'Cannot read the repo ('+rp.status+')');
+   }
+   else if(g.status===401)throw new Error('Token rejected or expired');
+   else if(g.status===403)throw new Error('Token lacks permission. Needs Contents: read and write');
+   else throw new Error('GitHub error '+g.status);
+   const before=JSON.stringify(payload(S));
+   if(remote){const m=mergeState(S,remote);S=Object.assign(S,m)}
+   const after=JSON.stringify(payload(S));
+   if(after!==before)changedLocal=true;
+   persist();
+   if(!remote||after!==JSON.stringify(payload(Object.assign({deleted:{},tu:0},remote)))){
+    const body={message:'metrik runs sync',content:b64e(JSON.stringify(payload(S),null,1))};
+    if(sha)body.sha=sha;
+    const p=await gh('PUT','/contents/'+FILE,body);
+    if(p.status===200||p.status===201){ok=true;break}
+    if(p.status===409||p.status===422){continue}
+    if(p.status===401)throw new Error('Token rejected or expired');
+    if(p.status===403||p.status===404)throw new Error('Token cannot write to the repo. Needs Contents: read and write');
+    throw new Error('GitHub error '+p.status);
+   }else{ok=true;break}
+  }
+  if(!ok)throw new Error('Sync conflict, will retry');
+  lastSync=Date.now();
+ }catch(e){
+  syncErr=true;
+  syncMsg=(e&&e.message&&!/fetch|network|load failed/i.test(e.message))?e.message:'Offline, changes kept here and will sync later';
+ }
+ syncBusy=false;refreshStatus();
+ if(changedLocal&&!editIdx_open()&&view!=='log')render();
+ if(syncAgain){syncAgain=false;schedulePush()}
+ return ok;
+}
+function editIdx_open(){return typeof editIdx!=='undefined'&&editIdx>=0}
+window.addEventListener('online',()=>sync());
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&cfg)sync()});
 function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2200)}
 
 /* ---------- classifier ---------- */
@@ -270,7 +361,8 @@ function rSetup(){
  $('#app').innerHTML=`<div class="card"><b>Tasks</b><p class="mut" style="margin:4px 0 0">Days between runs. 0 means no schedule, so no overdue alert.</p>
  ${S.tasks.map((t,i)=>i===editIdx?`<div style="margin-top:10px;border:1px solid var(--acc);border-radius:12px;padding:10px"><input id="en" value="${esc(t.n)}"><div class="row" style="margin-top:8px;gap:8px"><input id="ed" type="number" min="0" value="${t.d}" style="width:90px"><span class="mut">days between runs</span></div><div class="seg" style="margin-top:10px"><button class="on ok" data-a="tsave:${i}">Save</button><button data-a="tcancel">Cancel</button><button data-a="deltask:${i}" style="margin-left:auto;color:var(--bad)">Delete</button></div></div>`:`<div class="row" style="margin-top:10px;gap:8px"><div><b>${esc(t.n)}</b><div class="mut">${t.d?'every '+t.d+(t.d===1?' day':' days'):'no schedule'}</div></div><button class="btn" data-a="tedit:${i}">Edit</button></div>`).join('')}
  <button class="btn" style="margin-top:12px" data-a="addtask">Add task</button></div>
- <div class="card"><b>Backup</b><p class="mut" style="margin:4px 0 10px">Your data lives only in this browser. Export to a file and keep it in Drive or email it to yourself.</p>
+ <div class="card"><b>Sync</b>${cfg?`<p class="mut" style="margin:4px 0 10px">Connected to <b>${esc(cfg.repo)}</b>. ${esc(syncMsg)}.</p><div class="seg"><button data-a="syncnow">Sync now</button><button data-a="disconnect">Disconnect</button></div>`:`<p class="mut" style="margin:4px 0 0">Saves your log to a private GitHub repo so it survives a cleared browser and works on every device. Use a <b>private</b> repo.</p><label>Repo (owner/name)</label><input id="sr" placeholder="mikkyprestige/metrik-data" autocapitalize="none" autocorrect="off"><label>Access token</label><input id="st" type="password" placeholder="github_pat_..." autocomplete="off"><p class="mut" style="margin:6px 0 0">Fine-grained token, only that repo, Contents: read and write. It stays in this browser and is never exported.</p><button class="primary" style="margin-top:12px" data-a="connect">Connect and sync</button>`}</div>
+ <div class="card"><b>Backup</b><p class="mut" style="margin:4px 0 10px">Your data is kept in this browser${cfg?" and in your repo":""}. Export to a file and keep it in Drive or email it to yourself.</p>
  <div class="seg"><button data-a="export">Export file</button><button data-a="copy">Copy as text</button><button data-a="import">Import file</button></div>
  <p class="mut" style="margin:10px 0 0">Last export: ${S.lastExport?new Date(S.lastExport).toLocaleString():'never'}</p></div>
  <div class="card"><b>Learning</b><p class="mut" style="margin:4px 0 0">${learned} corrected run${learned===1?'':'s'} stored. When you fix a guess, the app remembers that reply and matches similar ones next time.</p>
@@ -290,19 +382,33 @@ document.addEventListener('click',e=>{
  else if(a==='push'){draft.pushes=Math.max(0,draft.pushes+Number(x));rPanel()}
  else if(a==='save')saveRun();
  else if(a==='win'){win=Number(x);rHealth()}
- else if(a==='res'){const r=S.runs.find(r=>r.id===x);if(r){r.result=y;save();rHistory()}}
- else if(a==='del'){if(confirm('Delete this run?')){S.runs=S.runs.filter(r=>r.id!==x);save();rHistory()}}
- else if(a==='addtask'){S.tasks.push({n:'New task',d:0});editIdx=S.tasks.length-1;save();rSetup()}
+ else if(a==='res'){const r=S.runs.find(r=>r.id===x);if(r){r.result=y;r.u=Date.now();save();rHistory()}}
+ else if(a==='del'){if(confirm('Delete this run?')){S.deleted[x]=Date.now();S.runs=S.runs.filter(r=>r.id!==x);save();rHistory()}}
+ else if(a==='addtask'){S.tu=Date.now();S.tasks.push({n:'New task',d:0});editIdx=S.tasks.length-1;save();rSetup()}
  else if(a==='tedit'){editIdx=Number(x);rSetup()}
  else if(a==='tcancel'){editIdx=-1;rSetup()}
  else if(a==='tsave'){const t=S.tasks[Number(x)],nn=($('#en').value||'').trim(),old=t.n;if(!nn){toast('Name needed');return}
   if(S.tasks.some((o,j)=>j!==Number(x)&&o.n===nn)){toast('Name already used');return}
-  t.n=nn;t.d=Math.max(0,Number($('#ed').value)||0);S.runs.forEach(r=>{if(r.task===old)r.task=nn});editIdx=-1;save();toast('Saved');rSetup()}
- else if(a==='deltask'){if(confirm('Delete this task? Logged runs stay.')){S.tasks.splice(Number(x),1);editIdx=-1;save();rSetup()}}
+  t.n=nn;t.d=Math.max(0,Number($('#ed').value)||0);S.tu=Date.now();S.runs.forEach(r=>{if(r.task===old){r.task=nn;r.u=Date.now()}});editIdx=-1;save();toast('Saved');rSetup()}
+ else if(a==='deltask'){if(confirm('Delete this task? Logged runs stay.')){S.tu=Date.now();S.tasks.splice(Number(x),1);editIdx=-1;save();rSetup()}}
  else if(a==='export')doExport();
  else if(a==='copy'){const t=JSON.stringify(S);(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{S.lastExport=Date.now();save();toast('Copied');rSetup()}).catch(()=>toast('Copy blocked. Use Export file.'))}
  else if(a==='import')$('#file').click();
- else if(a==='reset'){if(confirm('Erase all runs and tasks? Export first.')){S={tasks:JSON.parse(JSON.stringify(DEFAULT_TASKS)),runs:[],lastExport:null};save();rSetup()}}
+ else if(a==='reset'){if(confirm('Erase all runs and tasks'+(cfg?' here and in your repo':'')+'? Export first.')){const d=Object.assign({},S.deleted),now=Date.now();S.runs.forEach(r=>{d[r.id]=now});S={tasks:JSON.parse(JSON.stringify(DEFAULT_TASKS)),runs:[],lastExport:null,deleted:d,tu:now};save();rSetup()}}
+ else if(a==='syncnow'){sync().then(ok=>{toast(ok?'Synced':syncMsg);rSetup()})}
+ else if(a==='disconnect'){if(confirm('Disconnect? Data stays here and in the repo. The token is removed from this browser.')){cfg=null;try{localStorage.removeItem(SKEY)}catch(e){}refreshStatus();rSetup()}}
+ else if(a==='connect'){
+  const repo=($('#sr').value||'').trim().replace(/^https?:\/\/github\.com\//,'').replace(/\.git$/,'').replace(/\/$/,''),token=($('#st').value||'').trim();
+  if(!/^[\w.-]+\/[\w.-]+$/.test(repo)){toast('Repo must look like owner/name');return}
+  if(!token){toast('Paste the token');return}
+  cfg={repo,token};
+  toast('Connecting…');
+  sync().then(ok=>{
+   if(ok){try{localStorage.setItem(SKEY,JSON.stringify(cfg))}catch(e){}toast('Connected and synced')}
+   else{const m=syncMsg;cfg=null;syncErr=false;refreshStatus();toast(m)}
+   rSetup();
+  });
+ }
 });
 document.addEventListener('input',e=>{
  const id=e.target.id;
@@ -319,7 +425,7 @@ document.addEventListener('change',e=>{
   rd.onload=()=>{try{
    const d=JSON.parse(rd.result);if(!d||!Array.isArray(d.runs))throw 0;
    const have=new Set(S.runs.map(r=>r.id));let add=0;
-   d.runs.forEach(r=>{if(r&&r.id&&!have.has(r.id)){S.runs.push(r);add++}});
+   d.runs.forEach(r=>{if(r&&r.id&&!have.has(r.id)&&!(S.deleted[r.id])){r.u=r.u||Date.now();S.runs.push(r);add++}});
    if(Array.isArray(d.tasks))d.tasks.forEach(t=>{if(t&&t.n&&!S.tasks.some(x=>x.n===t.n))S.tasks.push(t)});
    save();toast('Imported '+add+' runs');render();
   }catch(err){toast('That file is not a Metrik Runs backup')}e.target.value=''};
@@ -334,7 +440,7 @@ function saveRun(){
   result:draft.outcome==='drafted'?draft.result:'none',
   wrongSkip:draft.outcome==='skipped'&&draft.wrongSkip,memFail:draft.memFail,note:draft.note.trim()};
  if(corrected){r.corrected=true;r.text=draft.text.slice(0,600)}
- S.runs.push(r);save();draft=newDraft();toast('Saved');render();
+ r.u=Date.now();S.runs.push(r);save();draft=newDraft();toast('Saved');render();
 }
 function doExport(){
  try{
@@ -345,7 +451,7 @@ function doExport(){
   S.lastExport=Date.now();save();rSetup();
  }catch(e){toast('Export blocked. Use Copy as text.')}
 }
-save();render();
+persist();render();refreshStatus();if(cfg)sync();
 </script>
 </body>
 </html>
