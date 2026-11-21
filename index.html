@@ -195,7 +195,7 @@ const RX={
  draftNoPropose:/(haven'?t|have not|hasn'?t|not yet)\s+(yet\s+)?(drafted|proposed|sent|called propose)/,
  drafted:/(waiting (on|for) (your )?approval|ready for (your )?approval|up for (your )?approval|up as a card|waiting for your approval|draft is up|proposed the post|proposed (a )?reply)/,
  stall:/(say the word|if you want me to|i'?ll do both|next turn|task is incomplete|haven'?t (saved|drafted|proposed|sent)|before drafting|since you asked me not to)/,
- skip:/(not posting anything|drafted nothing|drafted 0|didn'?t draft|did not draft|no [a-z ]{3,30} today|none qualif|nothing (new )?qualif|nothing new|skipped (it|this)|i'?m holding off|no new items)/,
+ skip:/(not posting anything|not going to (post|draft|propose)|i'?d (rather )?skip|rather skip|i'?m skipping|skipping (it|this)|drafted nothing|drafted 0|didn'?t draft|did not draft|no [a-z ]{3,30} today|none qualif|nothing (new )?qualif|nothing new|skipped (it|this)|i'?m holding off|no new items)/,
  error:/(rejected|over the length|length limit|returned an error|failed|could not load)/,
  mem:/(memory not saved|couldn'?t save|save_memory failed|failed to save)/,
  unsaved:/(not saved yet|aren'?t saved yet|haven'?t saved|hasn'?t been saved)/
@@ -213,8 +213,8 @@ function classify(text){
  const m=k=>{const x=s.match(RX[k]);return x?x[0]:null};
  const dn=m('draftNoPropose'),dr=m('drafted'),st=m('stall'),sk=m('skip'),er=m('error'),me=m('mem'),us=m('unsaved');
  if(dr&&!dn){g.outcome='drafted';why.push('draft card: "'+dr+'"')}
+ else if(sk&&!/(say the word|if you want me to|i'?ll do both|next turn|task is incomplete|before drafting|since you asked me not to)/.test(s)){g.outcome='skipped';why.push('skip: "'+sk+'"')}
  else if(dn||st){g.outcome='drafted';g.pushes=1;why.push('stalled: "'+(dn||st)+'"')}
- else if(sk){g.outcome='skipped';why.push('skip: "'+sk+'"')}
  else why.push('no clear phrase, check the outcome');
  if(er){if(dr||sk){why.push('error seen but it recovered: "'+er+'"')}else{why.push('error: "'+er+'"');g.outcome='error'}}
  if(us&&!g.pushes&&g.outcome==='drafted'){g.pushes=1;why.push('save step not done: "'+us+'"')}
