@@ -40,6 +40,7 @@ textarea{min-height:130px;resize:vertical}
 .stepper b{min-width:28px;text-align:center;font-size:20px}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#222833;border:1px solid var(--line);padding:10px 16px;border-radius:10px;font-size:14px;z-index:9}
 small{color:var(--mut)}
+button:disabled{opacity:.35}
 .x{background:none;border:0;color:var(--mut);font-size:13px;padding:6px}
 </style>
 </head>
@@ -228,7 +229,7 @@ function classify(text){
 }
 
 /* ---------- state ---------- */
-let view='log',win=14,tm=null;
+let view='log',win=14,tm=null,hp=0,hf='';const PER=10;
 let draft=newDraft();
 function newDraft(){return{ts:Date.now(),task:'',outcome:'drafted',pushes:0,result:'pending',wrongSkip:false,memFail:false,note:'',text:'',guess:null,why:''}}
 function applyGuess(){
@@ -340,8 +341,12 @@ function rHealth(){
  $('#app').innerHTML=h;
 }
 function rHistory(){
- const rows=[...S.runs].sort((a,b)=>b.ts-a.ts);
- let h='';
+ const names=[...new Set(S.runs.map(r=>r.task))].sort();
+ if(hf&&!names.includes(hf))hf='';
+ const all=S.runs.filter(r=>!hf||r.task===hf).sort((a,b)=>b.ts-a.ts);
+ const pages=Math.max(1,Math.ceil(all.length/PER));hp=Math.min(Math.max(0,hp),pages-1);
+ const rows=all.slice(hp*PER,hp*PER+PER);
+ let h=`<div class="card"><select id="hf" data-a="hfilter" style="width:100%;min-height:44px;background:#0f1218;color:var(--tx);border:1px solid var(--line);border-radius:10px;font-size:15px;padding:0 10px"><option value="">All tasks</option>${names.map(n=>`<option value="${esc(n)}"${n===hf?' selected':''}>${esc(n)}</option>`).join('')}</select></div>`;
  rows.forEach(r=>{
   const chips=[];
   if(r.pushes)chips.push(`<span class="chip warn">${r.pushes} push${r.pushes>1?'es':''}</span>`);
@@ -356,7 +361,9 @@ function rHistory(){
   ${r.outcome==='drafted'&&r.result==='pending'?`<div class="seg" style="margin-top:10px"><button data-a="res:${r.id}:approved">Approved</button><button data-a="res:${r.id}:edited">Edited</button><button data-a="res:${r.id}:discarded">Discarded</button></div>`:''}
   <button class="x" data-a="del:${r.id}">Delete</button></div>`;
  });
- $('#app').innerHTML=h||'<div class="card mut">Nothing logged yet.</div>';
+ if(pages>1)h+=`<div class="card"><div class="row"><button class="btn" data-a="hpage:-1" ${hp===0?'disabled':''}>Newer</button><span class="mut">Page ${hp+1} of ${pages} · ${all.length} runs</span><button class="btn" data-a="hpage:1" ${hp>=pages-1?'disabled':''}>Older</button></div></div>`;
+ if(!all.length)h+='<div class="card mut">'+(hf?'No runs for this task.':'Nothing logged yet.')+'</div>';
+ $('#app').innerHTML=h;
 }
 function rSetup(){
  const learned=S.runs.filter(r=>r.corrected).length;
@@ -375,7 +382,8 @@ function rSetup(){
 document.addEventListener('click',e=>{
  const b=e.target.closest('[data-a]');if(!b)return;
  const [a,x,y]=b.dataset.a.split(':');
- if(a==='tab'){view=x;render()}
+ if(a==='tab'){view=x;if(x==='history'){hp=0;hf=''}render()}
+ else if(a==='hpage'){hp+=Number(x);rHistory();window.scrollTo(0,0)}
  else if(a==='set'){
   if(x==='wrongSkip'||x==='memFail')draft[x]=(y==='true');
   else{draft[x]=y;if(x==='outcome'){draft.result=y==='drafted'?'pending':'none';if(y!=='skipped')draft.wrongSkip=false}}
@@ -419,7 +427,8 @@ document.addEventListener('input',e=>{
 });
 document.addEventListener('change',e=>{
  const id=e.target.id;
- if(id==='taskSel')draft.task=e.target.value;
+ if(id==='hf'){hf=e.target.value;hp=0;rHistory()}
+ else if(id==='taskSel')draft.task=e.target.value;
  else if(id==='when'){const t=new Date(e.target.value).getTime();if(!isNaN(t))draft.ts=t}
  else if(id==='file'){
   const f=e.target.files[0];if(!f)return;
