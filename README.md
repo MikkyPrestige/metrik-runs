@@ -9,8 +9,10 @@ Agent chat history can't be exported, and logging runs by hand doesn't last. So 
 1. **Log.** Paste the agent's reply. The app guesses the task, the outcome (drafted, skipped, error) and whether the run stalled, and shows the phrase it matched.
 2. **Confirm.** Fix anything wrong, set what you did with the draft (approved, edited, discarded) and tap Save.
 3. **Health.** Per-task clean rate, pushes, wrong skips, discards and edits, with a short pointer when the counts justify one.
-4. **History.** Every run, with its result. Drafts left unresolved can be settled later.
-5. **Overdue alert.** Set each task's schedule in Setup. A task with no log for 1.5 times its interval shows a banner, so a forgotten run leaves a visible gap.
+4. **History.** Every run, 10 per page, with its result. Drafts left unresolved can be settled later, and any run can be edited.
+5. **Review.** Approved and edited drafts are posts. About a week after posting, enter the numbers Hup shows (likes, comments, reposts, views, how many people tipped and the total LYX tipped). The tab then averages them per task. It also keeps a log of decisions and rule changes, with the run stats from the 14 days before and after each one.
+6. **Filters.** History and Health can be filtered by how often a task runs (daily, every 3 days, weekly, manual), and History by task.
+7. **Overdue alert.** Set each task's schedule in Setup. A task with no log for 1.5 times its interval shows a banner, so a forgotten run leaves a visible gap.
 
 The classifier is keyword rules, not a model. When you correct a guess, the app stores that reply and matches similar ones next time. There is no API key and no cost.
 
