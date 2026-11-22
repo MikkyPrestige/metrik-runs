@@ -28,6 +28,8 @@ textarea{min-height:130px;resize:vertical}
 .row{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .mut{color:var(--mut);font-size:14px}
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.mgrid{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px}.mgrid label{margin:8px 0 4px}
+details>summary{color:var(--mut);padding:12px 2px;cursor:pointer}
 .chip{font-size:13px;padding:3px 9px;border-radius:99px;border:1px solid var(--line);color:var(--mut)}
 .chip.ok{color:var(--ok);border-color:#1f4a38}.chip.bad{color:var(--bad);border-color:#5a2626}.chip.warn{color:var(--warn);border-color:#5a4318}
 .banner{border:1px solid #5a4318;background:#241d0f;color:var(--warn);border-radius:12px;padding:10px 12px;margin:12px 0;font-size:14px}
@@ -88,7 +90,7 @@ function load(){
  return seed();
 }
 let S=load();
-S.deleted=S.deleted||{};S.tu=S.tu||0;
+S.deleted=S.deleted||{};S.tu=S.tu||0;S.changes=S.changes||[];
 if(!S.tasks.some(t=>t.n==='Join conversation')){S.tasks.splice(3,0,{n:'Join conversation',d:0})}
 let editIdx=-1;
 function persist(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('Browser storage blocked. Export a backup now.')}}
@@ -98,9 +100,9 @@ function save(){persist();schedulePush()}
 const FILE='metrik-runs-data.json';
 let syncBusy=false,syncAgain=false,syncTm=null,syncMsg='',lastSync=null,syncErr=false;
 const runKey=r=>r.ts+'|'+r.task;
-function payload(s){return{tasks:s.tasks,runs:s.runs,deleted:s.deleted||{},tu:s.tu||0}}
+function payload(s){return{tasks:s.tasks,runs:s.runs,changes:s.changes||[],deleted:s.deleted||{},tu:s.tu||0}}
 function mergeState(a,b){
- const out={tasks:a.tasks,runs:[],deleted:Object.assign({},a.deleted||{}),tu:a.tu||0,lastExport:a.lastExport||null};
+ const out={tasks:a.tasks,runs:[],changes:[],deleted:Object.assign({},a.deleted||{}),tu:a.tu||0,lastExport:a.lastExport||null};
  Object.entries(b.deleted||{}).forEach(([k,v])=>{out.deleted[k]=Math.max(out.deleted[k]||0,v)});
  if((b.tu||0)>(a.tu||0)&&Array.isArray(b.tasks)){out.tasks=b.tasks;out.tu=b.tu}
  const byId=new Map();
@@ -112,6 +114,9 @@ function mergeState(a,b){
   if(!o||(r.u||0)>(o.u||0))byKey.set(k,r);
  });
  out.runs=[...byKey.values()];
+ const cb=new Map();
+ [].concat(a.changes||[],b.changes||[]).forEach(c=>{if(!c||!c.id)return;const o=cb.get(c.id);if(!o||(c.u||0)>(o.u||0))cb.set(c.id,c)});
+ out.changes=[...cb.values()].filter(c=>!((out.deleted[c.id]||0)>=(c.u||0)&&out.deleted[c.id]));
  return out;
 }
 const b64e=s=>btoa(unescape(encodeURIComponent(s)));
@@ -229,7 +234,7 @@ function classify(text){
 }
 
 /* ---------- state ---------- */
-let view='log',win=14,tm=null,hp=0,hf='',ff=null,eid=null,ed=null;const PER=10;
+let view='log',win=14,tm=null,hp=0,hf='',ff=null,eid=null,ed=null,rw=30,mid=null,cid=null,cf={task:'',text:'',ts:null};const PER=10;
 let draft=newDraft();
 function newDraft(){return{ts:Date.now(),task:'',outcome:'drafted',pushes:0,result:'pending',wrongSkip:false,memFail:false,note:'',text:'',guess:null,why:''}}
 function applyGuess(){
@@ -259,9 +264,9 @@ function overdue(){
 
 /* ---------- views ---------- */
 function render(){
- $('#tabs').innerHTML=[['log','Log'],['health','Health'],['history','History'],['setup','Setup']]
+ $('#tabs').innerHTML=[['log','Log'],['health','Health'],['history','History'],['review','Review'],['setup','Setup']]
   .map(([k,l])=>`<button data-a="tab:${k}" class="${view===k?'on':''}">${l}</button>`).join('');
- ({log:rLog,health:rHealth,history:rHistory,setup:rSetup})[view]();
+ ({log:rLog,health:rHealth,history:rHistory,review:rReview,setup:rSetup})[view]();
 }
 function rLog(){
  let b='';
@@ -313,6 +318,64 @@ function editCard(){
  <label>Note (optional)</label><input id="e-note" value="${esc(e.note||'')}">
  <div class="seg" style="margin-top:12px"><button class="primary" data-a="esave">Save changes</button><button class="btn" data-a="ecancel">Cancel</button></div></div>`;
 }
+/* ---------- review ---------- */
+const MK=['likes','comments','reposts','views','tippers','lyx'];
+const ML={likes:'Likes',comments:'Comments',reposts:'Reposts',views:'Views',tippers:'Tippers (people)',lyx:'LYX tipped (total)'};
+const num=v=>{const n=parseFloat(String(v).replace(',','.'));return isFinite(n)&&n>0?n:0};
+const f1=n=>String(Math.round(n*10)/10),f2=n=>String(Math.round(n*100)/100);
+const ageD=r=>Math.floor((Date.now()-r.ts)/DAY);
+const postRuns=()=>S.runs.filter(r=>r.outcome==='drafted'&&(r.result==='approved'||r.result==='edited'));
+const hd=t=>`<h2 style="font-size:14px;color:var(--mut);margin:20px 0 8px;font-weight:600">${t}</h2>`;
+function mCard(r){
+ const head=`<div class="row"><b>${esc(r.task)}</b><span class="mut">${fmt(r.ts)} · ${ageD(r)}d old</span></div>${r.note?`<p class="mut" style="margin:6px 0 0">${esc(r.note)}</p>`:''}`;
+ if(r.m&&r.id!==mid){const m=r.m;
+  return `<div class="card">${head}<div class="chips"><span class="chip">${m.likes} likes</span><span class="chip">${m.comments} comments</span><span class="chip">${m.reposts} reposts</span><span class="chip">${m.views} views</span><span class="chip ${m.tippers?'ok':''}">${m.tippers} tipper${m.tippers===1?'':'s'} · ${f2(m.lyx)} LYX</span></div><button class="x" data-a="mopen:${r.id}">Update numbers</button></div>`}
+ const m=r.m||{};
+ return `<div class="card">${head}<div class="mgrid">${MK.map(k=>`<div><label>${ML[k]}</label><input type="number" inputmode="${k==='lyx'?'decimal':'numeric'}" min="0" step="${k==='lyx'?'any':'1'}" data-rid="${r.id}" data-k="${k}" value="${m[k]||''}" placeholder="0"></div>`).join('')}</div><button class="primary" data-a="msave:${r.id}">Save numbers</button>${r.m?'<button class="x" data-a="mcancel">Cancel</button>':''}</div>`;
+}
+function mSummary(title,total,meas){
+ const n=meas.length,t={};MK.forEach(k=>t[k]=meas.reduce((a,r)=>a+(r.m[k]||0),0));
+ const av=k=>n?t[k]/n:0;
+ return `<div class="card"><div class="row"><b>${esc(title)}</b><span class="mut">${n} of ${total} posts measured</span></div>
+ ${n?`<div class="mgrid" style="margin-top:10px">${[['Likes','likes',f1],['Comments','comments',f1],['Reposts','reposts',f1],['Views','views',f1],['Tippers','tippers',f1],['LYX','lyx',f2]].map(([l,k,f])=>`<div><span class="mut">${l} per post</span><br><b>${f(av(k))}</b></div>`).join('')}</div>
+ <p class="mut" style="margin:10px 0 0">Total ${f2(t.lyx)} LYX from ${t.tippers} tipper${t.tippers===1?'':'s'}${t.tippers?' · '+f2(t.lyx/t.tippers)+' LYX per tipper':''}</p>`:'<p class="mut" style="margin:8px 0 0">No numbers yet.</p>'}</div>`;
+}
+function baSummary(c){
+ const W=14*DAY,pool=S.runs.filter(r=>!c.task||r.task===c.task);
+ const bef=pool.filter(r=>r.ts>=c.ts-W&&r.ts<c.ts),aft=pool.filter(r=>r.ts>=c.ts&&r.ts<=c.ts+W);
+ const st=a=>({n:a.length,clean:a.length?Math.round(a.filter(isClean).length/a.length*100):0,push:a.length?Math.round(a.reduce((x,r)=>x+r.pushes,0)/a.length*10)/10:0});
+ const b=st(bef),a=st(aft),pl=n=>n+' run'+(n===1?'':'s');
+ if(!a.n)return 'Waiting for runs after this change.';
+ return (b.n?`Before: ${pl(b.n)}, ${b.clean}% clean, ${b.push} pushes per run.`:'No runs before it.')+` After: ${pl(a.n)}, ${a.clean}% clean, ${a.push} pushes per run.`+(a.n<3?' Too few runs to judge yet.':'');
+}
+function rReview(){
+ const inRw=r=>rw===0||r.ts>=Date.now()-rw*DAY;
+ const all=postRuns().filter(fOk);
+ const due=all.filter(r=>!r.m&&ageD(r)>=7).sort((a,b)=>a.ts-b.ts);
+ const young=all.filter(r=>!r.m&&ageD(r)<7).sort((a,b)=>b.ts-a.ts);
+ const done=all.filter(r=>r.m).sort((a,b)=>b.ts-a.ts);
+ const rb=[[7,'7d'],[14,'14d'],[30,'30d'],[0,'All']].map(([v,l])=>`<button class="${rw===v?'on':''}" data-a="rwin:${v}">${l}</button>`).join('');
+ let h=`<div class="card">${freqBar()}<div class="seg">${rb}</div></div>`;
+ h+=hd('Due to measure ('+due.length+')');
+ h+=due.length?due.map(mCard).join(''):'<div class="card mut">Nothing due. Posts show up here once they are 7 days old.</div>';
+ if(young.length)h+=`<details><summary>Not 7 days old yet (${young.length})</summary>${young.map(mCard).join('')}</details>`;
+ h+=hd('By task');
+ const wAll=all.filter(inRw),wDone=done.filter(inRw);
+ h+=mSummary('All tasks',wAll.length,wDone);
+ [...new Set(wAll.map(r=>r.task))].sort().forEach(n=>{h+=mSummary(n,wAll.filter(r=>r.task===n).length,wDone.filter(r=>r.task===n))});
+ if(wDone.length)h+=`<details><summary>Measured posts (${wDone.length})</summary>${wDone.slice(0,15).map(mCard).join('')}${wDone.length>15?'<p class="mut">Showing the latest 15.</p>':''}</details>`;
+ h+=hd('Decisions and changes');
+ h+=`<div class="card"><b>${cid?'Edit change':'Decision or change'}</b>
+ <label>Task</label><select id="c-task"><option value="">General (all tasks)</option>${S.tasks.map(t=>`<option ${t.n===cf.task?'selected':''}>${esc(t.n)}</option>`).join('')}</select>
+ <label>What I'm changing</label><input id="c-text" value="${esc(cf.text)}" placeholder="e.g. Football weekly: dropped the Guardian feed">
+ <label>When</label><input type="datetime-local" id="c-when" value="${localVal(cf.ts||Date.now())}">
+ <button class="primary" data-a="csave">${cid?'Save change':'Log it'}</button>${cid?'<button class="x" data-a="ccancel">Cancel</button>':''}</div>`;
+ [...S.changes].sort((a,b)=>b.ts-a.ts).forEach(c=>{
+  h+=`<div class="card"><div class="row"><b>${esc(c.task||'General')}</b><span class="mut">${fmt(c.ts)}</span></div><p style="margin:8px 0 0">${esc(c.text)}</p><p class="mut" style="margin:8px 0 0">${esc(baSummary(c))}</p><button class="x" data-a="cedit:${c.id}">Edit</button><button class="x" data-a="cdel:${c.id}">Delete</button></div>`;
+ });
+ $('#app').innerHTML=h;
+}
+
 function inWin(r){return win===0||r.ts>=Date.now()-win*DAY}
 function agg(runs){
  const n=runs.length,drafts=runs.filter(r=>r.outcome==='drafted');
@@ -407,8 +470,28 @@ function rSetup(){
 document.addEventListener('click',e=>{
  const b=e.target.closest('[data-a]');if(!b)return;
  const [a,x,y]=b.dataset.a.split(':');
- if(a==='tab'){view=x;eid=null;if(x==='history'){hp=0;hf=''}render()}
- else if(a==='freq'){ff=x==='all'?null:Number(x);hp=0;if(view==='health')rHealth();else rHistory()}
+ if(a==='tab'){view=x;eid=null;mid=null;if(x==='history'){hp=0;hf=''}render()}
+ else if(a==='freq'){ff=x==='all'?null:Number(x);hp=0;if(view==='health')rHealth();else if(view==='review')rReview();else rHistory()}
+ else if(a==='rwin'){rw=Number(x);rReview()}
+ else if(a==='mopen'){mid=x;rReview()}
+ else if(a==='mcancel'){mid=null;rReview()}
+ else if(a==='msave'){
+  const r=S.runs.find(r=>r.id===x);if(!r)return;const m={};
+  document.querySelectorAll('[data-rid="'+x+'"]').forEach(i=>{m[i.dataset.k]=num(i.value)});
+  MK.forEach(k=>{if(m[k]===undefined)m[k]=0});
+  ['likes','comments','reposts','views','tippers'].forEach(k=>{m[k]=Math.round(m[k])});
+  m.at=Date.now();r.m=m;r.u=Date.now();mid=null;save();toast('Saved');rReview();
+ }
+ else if(a==='csave'){
+  if(!(cf.text||'').trim()){toast('Write what you are changing');return}
+  const ts=cf.ts||Date.now();
+  if(cid){const c=S.changes.find(c=>c.id===cid);if(c){c.task=cf.task;c.text=cf.text.trim();c.ts=ts;c.u=Date.now()}}
+  else S.changes.push({id:uid(),ts,task:cf.task,text:cf.text.trim(),u:Date.now()});
+  cid=null;cf={task:'',text:'',ts:null};save();toast('Saved');rReview();
+ }
+ else if(a==='ccancel'){cid=null;cf={task:'',text:'',ts:null};rReview()}
+ else if(a==='cedit'){const c=S.changes.find(c=>c.id===x);if(c){cid=x;cf={task:c.task||'',text:c.text,ts:c.ts};rReview();window.scrollTo(0,0)}}
+ else if(a==='cdel'){if(confirm('Delete this entry?')){S.deleted[x]=Date.now();S.changes=S.changes.filter(c=>c.id!==x);save();rReview()}}
  else if(a==='edit'){const r=S.runs.find(r=>r.id===x);if(r){ed={...r};eid=x;rHistory()}}
  else if(a==='ecancel'){eid=null;ed=null;rHistory()}
  else if(a==='eset'){
@@ -446,7 +529,7 @@ document.addEventListener('click',e=>{
  else if(a==='export')doExport();
  else if(a==='copy'){const t=JSON.stringify(S);(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>{S.lastExport=Date.now();save();toast('Copied');rSetup()}).catch(()=>toast('Copy blocked. Use Export file.'))}
  else if(a==='import')$('#file').click();
- else if(a==='reset'){if(confirm('Erase all runs and tasks'+(cfg?' here and in your repo':'')+'? Export first.')){const d=Object.assign({},S.deleted),now=Date.now();S.runs.forEach(r=>{d[r.id]=now});S={tasks:JSON.parse(JSON.stringify(DEFAULT_TASKS)),runs:[],lastExport:null,deleted:d,tu:now};save();rSetup()}}
+ else if(a==='reset'){if(confirm('Erase all runs and tasks'+(cfg?' here and in your repo':'')+'? Export first.')){const d=Object.assign({},S.deleted),now=Date.now();S.runs.forEach(r=>{d[r.id]=now});(S.changes||[]).forEach(c=>{d[c.id]=now});S={tasks:JSON.parse(JSON.stringify(DEFAULT_TASKS)),runs:[],changes:[],lastExport:null,deleted:d,tu:now};save();rSetup()}}
  else if(a==='syncnow'){sync().then(ok=>{toast(ok?'Synced':syncMsg);rSetup()})}
  else if(a==='disconnect'){if(confirm('Disconnect? Data stays here and in the repo. The token is removed from this browser.')){cfg=null;try{localStorage.removeItem(SKEY)}catch(e){}refreshStatus();rSetup()}}
  else if(a==='connect'){
@@ -467,11 +550,14 @@ document.addEventListener('input',e=>{
  if(id==='paste'){clearTimeout(tm);tm=setTimeout(()=>{draft.text=e.target.value;applyGuess();rPanel()},350)}
  else if(id==='note')draft.note=e.target.value;
  else if(id==='e-note'&&ed)ed.note=e.target.value;
+ else if(id==='c-text')cf.text=e.target.value;
 });
 document.addEventListener('change',e=>{
  const id=e.target.id;
  if(id==='hf'){hf=e.target.value;hp=0;rHistory()}
  else if(id==='e-task'&&ed)ed.task=e.target.value;
+ else if(id==='c-task')cf.task=e.target.value;
+ else if(id==='c-when'){const t=new Date(e.target.value).getTime();if(!isNaN(t))cf.ts=t}
  else if(id==='e-when'&&ed){const t=new Date(e.target.value).getTime();if(!isNaN(t))ed.ts=t}
  else if(id==='taskSel')draft.task=e.target.value;
  else if(id==='when'){const t=new Date(e.target.value).getTime();if(!isNaN(t))draft.ts=t}
@@ -483,6 +569,7 @@ document.addEventListener('change',e=>{
    const have=new Set(S.runs.map(r=>r.id));let add=0;
    d.runs.forEach(r=>{if(r&&r.id&&!have.has(r.id)&&!(S.deleted[r.id])){r.u=r.u||Date.now();S.runs.push(r);add++}});
    if(Array.isArray(d.tasks))d.tasks.forEach(t=>{if(t&&t.n&&!S.tasks.some(x=>x.n===t.n))S.tasks.push(t)});
+   if(Array.isArray(d.changes))d.changes.forEach(c=>{if(c&&c.id&&!S.changes.some(x=>x.id===c.id)&&!S.deleted[c.id]){c.u=c.u||Date.now();S.changes.push(c)}});
    save();toast('Imported '+add+' runs');render();
   }catch(err){toast('That file is not a Metrik Runs backup')}e.target.value=''};
   rd.readAsText(f);
