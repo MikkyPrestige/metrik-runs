@@ -186,7 +186,7 @@ const TASK_RULES=[
  ['LUKSO Update',/update #\d+|luksonews|lukso update|lyx is at|lyx price|read_prices/],
  ['Reply to my notifications',/comment|replied|reply to|notifications|propose_reply/],
  ['Big match special',/derby|cl[aá]sico|title clash|relegation|knockout/],
- ['Football weekly',/football weekly|weekly football/],
+ ['Football weekly',/football weekly|weekly football|football this week|weekly recap|\brecap\b|(pick|picked|picking|named|choose)( the)?( final| first)? three|three (football )?stories/],
  ['Football hot topic',/bbc sport|sky sports|premier league|champions league|hot topic/],
  ['Community question',/community question/],
  ['Creator spotlight',/spotlight/],
@@ -229,7 +229,7 @@ function classify(text){
 }
 
 /* ---------- state ---------- */
-let view='log',win=14,tm=null,hp=0,hf='';const PER=10;
+let view='log',win=14,tm=null,hp=0,hf='',ff=null,eid=null,ed=null;const PER=10;
 let draft=newDraft();
 function newDraft(){return{ts:Date.now(),task:'',outcome:'drafted',pushes:0,result:'pending',wrongSkip:false,memFail:false,note:'',text:'',guess:null,why:''}}
 function applyGuess(){
@@ -289,6 +289,30 @@ function rPanel(){
  <label>Note (optional)</label><input id="note" value="${esc(draft.note)}" placeholder="e.g. ignored the 350 limit">
  <button class="primary" data-a="save">Save run</button></div>`;
 }
+const tdOf=n=>{const t=S.tasks.find(t=>t.n===n);return t?t.d:null};
+const fOk=r=>ff===null||tdOf(r.task)===ff;
+const fLabel=d=>d===0?'Manual':d===1?'Daily':d===7?'Weekly':'Every '+d+' days';
+function freqBar(){
+ if(ff!==null&&!S.tasks.some(t=>t.d===ff))ff=null;
+ const ds=[...new Set(S.tasks.map(t=>t.d))].sort((a,b)=>(a||999)-(b||999));
+ if(ds.length<2)return '';
+ return '<div class="seg" style="margin-bottom:10px"><button class="'+(ff===null?'on':'')+'" data-a="freq:all">All</button>'+ds.map(d=>`<button class="${ff===d?'on':''}" data-a="freq:${d}">${fLabel(d)}</button>`).join('')+'</div>';
+}
+function segE(field,opts,val){return '<div class="seg">'+opts.map(([v,l,c])=>`<button class="${val===v?'on '+(c||''):''}" data-a="eset:${field}:${v}">${l}</button>`).join('')+'</div>'}
+function editCard(){
+ const e=ed,names=S.tasks.map(t=>t.n);if(e.task&&!names.includes(e.task))names.push(e.task);
+ return `<div class="card"><b>Edit run</b>
+ <label>Task</label><select id="e-task">${names.map(n=>`<option ${n===e.task?'selected':''}>${esc(n)}</option>`).join('')}</select>
+ <label>Outcome</label>${segE('outcome',[['drafted','Drafted'],['skipped','Skipped'],['error','Error','bad']],e.outcome)}
+ <label>Pushes I had to send</label>
+ <div class="stepper"><button class="btn" data-a="epush:-1">−</button><b>${e.pushes}</b><button class="btn" data-a="epush:1">+</button></div>
+ ${e.outcome==='drafted'?`<label>What I did with the draft</label>${segE('result',[['pending','Not yet'],['approved','Approved','ok'],['edited','Edited'],['discarded','Discarded','bad']],e.result)}`:''}
+ ${e.outcome==='skipped'?`<label>Was the skip right?</label>${segE('wrongSkip',[['false','Right','ok'],['true','Wrong','bad']],String(!!e.wrongSkip))}`:''}
+ <label>Memory save failed?</label>${segE('memFail',[['false','No'],['true','Yes','bad']],String(!!e.memFail))}
+ <label>When</label><input type="datetime-local" id="e-when" value="${localVal(e.ts)}">
+ <label>Note (optional)</label><input id="e-note" value="${esc(e.note||'')}">
+ <div class="seg" style="margin-top:12px"><button class="primary" data-a="esave">Save changes</button><button class="btn" data-a="ecancel">Cancel</button></div></div>`;
+}
 function inWin(r){return win===0||r.ts>=Date.now()-win*DAY}
 function agg(runs){
  const n=runs.length,drafts=runs.filter(r=>r.outcome==='drafted');
@@ -315,11 +339,11 @@ function tips(a){
  return t;
 }
 function rHealth(){
- const runs=S.runs.filter(inWin),a=agg(runs);
+ const runs=S.runs.filter(inWin).filter(fOk),a=agg(runs);
  const winBtns=[[7,'7d'],[14,'14d'],[30,'30d'],[0,'All']].map(([v,l])=>`<button class="${win===v?'on':''}" data-a="win:${v}">${l}</button>`).join('');
- let h=`<div class="card"><div class="seg">${winBtns}</div></div>
+ let h=`<div class="card">${freqBar()}<div class="seg">${winBtns}</div></div>
  <div class="stat"><div><b>${a.n}</b><span>runs</span></div><div><b>${a.n?Math.round(a.clean/a.n*100):0}%</b><span>clean</span></div><div><b>${a.pushes}</b><span>pushes</span></div></div>`;
- const od=overdue();
+ const od=overdue().filter(o=>fOk({task:o.n}));
  if(od.length)h+=`<div class="banner">Overdue: ${od.map(o=>esc(o.n)+' ('+o.days+'d since last log)').join(', ')}</div>`;
  const names=[...new Set(runs.map(r=>r.task))];
  names.forEach(n=>{
@@ -341,13 +365,14 @@ function rHealth(){
  $('#app').innerHTML=h;
 }
 function rHistory(){
- const names=[...new Set(S.runs.map(r=>r.task))].sort();
+ const names=[...new Set(S.runs.filter(fOk).map(r=>r.task))].sort();
  if(hf&&!names.includes(hf))hf='';
- const all=S.runs.filter(r=>!hf||r.task===hf).sort((a,b)=>b.ts-a.ts);
+ const all=S.runs.filter(fOk).filter(r=>!hf||r.task===hf).sort((a,b)=>b.ts-a.ts);
  const pages=Math.max(1,Math.ceil(all.length/PER));hp=Math.min(Math.max(0,hp),pages-1);
  const rows=all.slice(hp*PER,hp*PER+PER);
- let h=`<div class="card"><select id="hf" data-a="hfilter" style="width:100%;min-height:44px;background:#0f1218;color:var(--tx);border:1px solid var(--line);border-radius:10px;font-size:15px;padding:0 10px"><option value="">All tasks</option>${names.map(n=>`<option value="${esc(n)}"${n===hf?' selected':''}>${esc(n)}</option>`).join('')}</select></div>`;
+ let h=`<div class="card">${freqBar()}<select id="hf" data-a="hfilter" style="width:100%;min-height:44px;background:#0f1218;color:var(--tx);border:1px solid var(--line);border-radius:10px;font-size:15px;padding:0 10px"><option value="">All tasks</option>${names.map(n=>`<option value="${esc(n)}"${n===hf?' selected':''}>${esc(n)}</option>`).join('')}</select></div>`;
  rows.forEach(r=>{
+  if(r.id===eid){h+=editCard();return}
   const chips=[];
   if(r.pushes)chips.push(`<span class="chip warn">${r.pushes} push${r.pushes>1?'es':''}</span>`);
   if(r.wrongSkip)chips.push('<span class="chip bad">wrong skip</span>');
@@ -359,10 +384,10 @@ function rHistory(){
   <div class="chips">${chips.join('')}</div>
   ${r.note?`<p class="mut" style="margin:8px 0 0">${esc(r.note)}</p>`:''}
   ${r.outcome==='drafted'&&r.result==='pending'?`<div class="seg" style="margin-top:10px"><button data-a="res:${r.id}:approved">Approved</button><button data-a="res:${r.id}:edited">Edited</button><button data-a="res:${r.id}:discarded">Discarded</button></div>`:''}
-  <button class="x" data-a="del:${r.id}">Delete</button></div>`;
+  <button class="x" data-a="edit:${r.id}">Edit</button><button class="x" data-a="del:${r.id}">Delete</button></div>`;
  });
  if(pages>1)h+=`<div class="card"><div class="row"><button class="btn" data-a="hpage:-1" ${hp===0?'disabled':''}>Newer</button><span class="mut">Page ${hp+1} of ${pages} · ${all.length} runs</span><button class="btn" data-a="hpage:1" ${hp>=pages-1?'disabled':''}>Older</button></div></div>`;
- if(!all.length)h+='<div class="card mut">'+(hf?'No runs for this task.':'Nothing logged yet.')+'</div>';
+ if(!all.length)h+='<div class="card mut">'+(hf||ff!==null?'No runs for this filter.':'Nothing logged yet.')+'</div>';
  $('#app').innerHTML=h;
 }
 function rSetup(){
@@ -382,7 +407,24 @@ function rSetup(){
 document.addEventListener('click',e=>{
  const b=e.target.closest('[data-a]');if(!b)return;
  const [a,x,y]=b.dataset.a.split(':');
- if(a==='tab'){view=x;if(x==='history'){hp=0;hf=''}render()}
+ if(a==='tab'){view=x;eid=null;if(x==='history'){hp=0;hf=''}render()}
+ else if(a==='freq'){ff=x==='all'?null:Number(x);hp=0;if(view==='health')rHealth();else rHistory()}
+ else if(a==='edit'){const r=S.runs.find(r=>r.id===x);if(r){ed={...r};eid=x;rHistory()}}
+ else if(a==='ecancel'){eid=null;ed=null;rHistory()}
+ else if(a==='eset'){
+  if(x==='wrongSkip'||x==='memFail')ed[x]=(y==='true');
+  else{ed[x]=y;if(x==='outcome'){ed.result=y==='drafted'?(ed.result&&ed.result!=='none'?ed.result:'pending'):'none';if(y!=='skipped')ed.wrongSkip=false}}
+  rHistory();
+ }
+ else if(a==='epush'){ed.pushes=Math.max(0,ed.pushes+Number(x));rHistory()}
+ else if(a==='esave'){
+  const r=S.runs.find(r=>r.id===eid);if(!r||!ed.task){toast('Pick a task');return}
+  r.task=ed.task;r.outcome=ed.outcome;r.pushes=ed.pushes;
+  r.result=ed.outcome==='drafted'?ed.result:'none';
+  r.wrongSkip=ed.outcome==='skipped'&&!!ed.wrongSkip;r.memFail=!!ed.memFail;
+  r.ts=ed.ts;r.note=(ed.note||'').trim();r.u=Date.now();
+  eid=null;ed=null;save();toast('Saved');rHistory();
+ }
  else if(a==='hpage'){hp+=Number(x);rHistory();window.scrollTo(0,0)}
  else if(a==='set'){
   if(x==='wrongSkip'||x==='memFail')draft[x]=(y==='true');
@@ -424,10 +466,13 @@ document.addEventListener('input',e=>{
  const id=e.target.id;
  if(id==='paste'){clearTimeout(tm);tm=setTimeout(()=>{draft.text=e.target.value;applyGuess();rPanel()},350)}
  else if(id==='note')draft.note=e.target.value;
+ else if(id==='e-note'&&ed)ed.note=e.target.value;
 });
 document.addEventListener('change',e=>{
  const id=e.target.id;
  if(id==='hf'){hf=e.target.value;hp=0;rHistory()}
+ else if(id==='e-task'&&ed)ed.task=e.target.value;
+ else if(id==='e-when'&&ed){const t=new Date(e.target.value).getTime();if(!isNaN(t))ed.ts=t}
  else if(id==='taskSel')draft.task=e.target.value;
  else if(id==='when'){const t=new Date(e.target.value).getTime();if(!isNaN(t))draft.ts=t}
  else if(id==='file'){
