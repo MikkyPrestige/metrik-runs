@@ -99,7 +99,7 @@ function save(){persist();schedulePush()}
 /* ---------- GitHub sync ---------- */
 const FILE='metrik-runs-data.json';
 let syncBusy=false,syncAgain=false,syncTm=null,syncMsg='',lastSync=null,syncErr=false;
-const runKey=r=>r.ts+'|'+r.task;
+const runKey=r=>r.manual?r.id:r.ts+'|'+r.task;
 function payload(s){return{tasks:s.tasks,runs:s.runs,changes:s.changes||[],deleted:s.deleted||{},tu:s.tu||0}}
 function mergeState(a,b){
  const out={tasks:a.tasks,runs:[],changes:[],deleted:Object.assign({},a.deleted||{}),tu:a.tu||0,lastExport:a.lastExport||null};
@@ -235,7 +235,7 @@ function classify(text){
 }
 
 /* ---------- state ---------- */
-let view='log',win=14,tm=null,hp=0,hf='',ff=null,eid=null,ed=null,rw=30,mid=null,cid=null,cf={task:'',text:'',ts:null};const PER=10;
+let view='log',win=14,tm=null,hp=0,hf='',ff=null,eid=null,ed=null,rw=30,mid=null,cid=null,cf={task:'',text:'',ts:null},rs='all',ml=15,pf=null,pid=null;const PER=10;
 let draft=newDraft();
 function newDraft(){return{ts:Date.now(),task:'',outcome:'drafted',pushes:0,result:'pending',wrongSkip:false,memFail:false,note:'',text:'',guess:null,why:''}}
 function applyGuess(){
@@ -255,7 +255,7 @@ function overdue(){
  const out=[],now=Date.now();
  S.tasks.forEach(t=>{
   if(!t.d)return;
-  const mine=S.runs.filter(r=>r.task===t.n);
+  const mine=S.runs.filter(r=>r.task===t.n&&!r.manual);
   if(!mine.length)return;
   const last=Math.max(...mine.map(r=>r.ts)),days=(now-last)/DAY;
   if(days>t.d*1.5)out.push({n:t.n,days:Math.floor(days)});
@@ -327,12 +327,58 @@ const f1=n=>String(Math.round(n*10)/10),f2=n=>String(Math.round(n*100)/100);
 const ageD=r=>Math.floor((Date.now()-r.ts)/DAY);
 const postRuns=()=>S.runs.filter(r=>r.outcome==='drafted'&&(r.result==='approved'||r.result==='edited'));
 const hd=t=>`<h2 style="font-size:14px;color:var(--mut);margin:20px 0 8px;font-weight:600">${t}</h2>`;
+function normLink(v){return String(v||'').trim().replace(/^https?:\/\//i,'').replace(/^www\./i,'').replace(/\/$/,'')}
 function mCard(r){
- const head=`<div class="row"><b>${esc(r.task)}</b><span class="mut">${fmt(r.ts)} · ${ageD(r)}d old</span></div>${r.note?`<p class="mut" style="margin:6px 0 0">${esc(r.note)}</p>`:''}`;
+ const age=ageD(r);
+ const tags=(r.manual?'<span class="chip">added by hand</span>':'')+(r.old?'<span class="chip warn">old setup</span>':'');
+ const head=`<div class="row"><b>${esc(r.task)}</b><span class="mut">${fmt(r.ts)} · ${age}d old</span></div>${tags?`<div class="chips">${tags}</div>`:''}${r.link?`<div style="margin-top:6px;word-break:break-all"><a href="https://${esc(r.link)}" target="_blank" rel="noopener" style="color:var(--acc);font-size:14px">${esc(r.link)}</a></div>`:''}${r.note?`<p class="mut" style="margin:6px 0 0">${esc(r.note)}</p>`:''}`;
+ const tools=r.manual?`<button class="x" data-a="pedit:${r.id}">Edit</button><button class="x" data-a="pdel:${r.id}">Delete</button>`:'';
+ if(!r.m&&age<7){const d=7-age;return `<div class="card">${head}<p class="mut" style="margin:8px 0 0">Measured at 7 days. Due in ${d} day${d===1?'':'s'}.</p>${tools}</div>`}
  if(r.m&&r.id!==mid){const m=r.m;
-  return `<div class="card">${head}<div class="chips"><span class="chip">${m.likes} likes</span><span class="chip">${m.comments} comments</span><span class="chip">${m.reposts} reposts</span><span class="chip">${m.views} views</span><span class="chip ${m.tippers?'ok':''}">${m.tippers} tipper${m.tippers===1?'':'s'} · ${f2(m.lyx)} LYX</span></div><button class="x" data-a="mopen:${r.id}">Update numbers</button></div>`}
+  return `<div class="card">${head}<div class="chips"><span class="chip">${m.likes} likes</span><span class="chip">${m.comments} comments</span><span class="chip">${m.reposts} reposts</span><span class="chip">${m.views} views</span><span class="chip ${m.tippers?'ok':''}">${m.tippers} tipper${m.tippers===1?'':'s'} · ${f2(m.lyx)} LYX</span></div><button class="x" data-a="mopen:${r.id}">Update numbers</button><button class="x" data-a="mclear:${r.id}">Clear numbers</button>${tools}</div>`}
  const m=r.m||{};
- return `<div class="card">${head}<div class="mgrid">${MK.map(k=>`<div><label>${ML[k]}</label><input type="number" inputmode="${k==='lyx'?'decimal':'numeric'}" min="0" step="${k==='lyx'?'any':'1'}" data-rid="${r.id}" data-k="${k}" value="${m[k]||''}" placeholder="0"></div>`).join('')}</div><button class="primary" data-a="msave:${r.id}">Save numbers</button>${r.m?'<button class="x" data-a="mcancel">Cancel</button>':''}</div>`;
+ return `<div class="card">${head}<div class="mgrid">${MK.map(k=>`<div><label>${ML[k]}</label><input type="number" inputmode="${k==='lyx'?'decimal':'numeric'}" min="0" step="${k==='lyx'?'any':'1'}" data-rid="${r.id}" data-k="${k}" value="${m[k]||''}" placeholder="0"></div>`).join('')}</div><button class="primary" data-a="msave:${r.id}">Save numbers</button>${r.m?'<button class="x" data-a="mcancel">Cancel</button>':''}${tools}</div>`;
+}
+function newPf(k){return{task:k?k.task:'',ts:k?k.ts:Date.now(),link:'',note:'',old:k?k.old:false,m:{}}}
+function pForm(){
+ const e=pf,age=Math.floor((Date.now()-e.ts)/DAY),young=age<7;
+ const names=S.tasks.map(t=>t.n);if(e.task&&!names.includes(e.task))names.push(e.task);
+ const oldSeg=`<div class="seg"><button class="${!e.old?'on ok':''}" data-a="pold:0">Current</button><button class="${e.old?'on':''}" data-a="pold:1">Old setup</button></div>`;
+ const nums=young
+  ?`<p class="mut" style="margin:12px 0 0">Posted ${Math.max(age,0)} day${age===1?'':'s'} ago. It is measured at 7 days, so it waits in "Not 7 days old yet".</p>`
+  :`<label>Numbers</label><div class="mgrid">${MK.map(k=>`<div><label>${ML[k]}</label><input type="number" inputmode="${k==='lyx'?'decimal':'numeric'}" min="0" step="${k==='lyx'?'any':'1'}" data-pk="${k}" value="${esc(e.m[k]||'')}" placeholder="0"></div>`).join('')}</div><p class="mut" style="margin:8px 0 0">Fill any one field and the rest count as 0. Leave all blank to measure it later.</p>`;
+ return `<div class="card" style="border-color:var(--acc)"><b>${pid?'Edit post':'Add post'}</b>
+ <p class="mut" style="margin:4px 0 0">Posts from runs you logged already show up here. Add only the ones you did not log.</p>
+ <label>Task</label><select id="p-task"><option value="">Pick a task</option>${names.map(n=>`<option ${n===e.task?'selected':''}>${esc(n)}</option>`).join('')}</select>
+ <label>Posted</label><input type="datetime-local" id="p-when" value="${localVal(e.ts)}">
+ <label>Post link (optional)</label><input id="p-link" value="${esc(e.link)}" placeholder="hup.social/networks/42/12345" autocapitalize="none" autocorrect="off">
+ <label>Note (optional)</label><input id="p-note" value="${esc(e.note)}">
+ <label>Setup when it was posted</label>${oldSeg}
+ ${nums}
+ <button class="primary" data-a="psave">${pid?'Save changes':'Save post'}</button>
+ ${pid?'':'<button class="btn" style="width:100%;margin-top:8px" data-a="pnext">Save and add next</button>'}
+ <button class="x" style="margin-top:6px" data-a="pcancel">Cancel</button></div>`;
+}
+function savePost(next){
+ if(!pf.task){toast('Pick a task');return}
+ const age=Math.floor((Date.now()-pf.ts)/DAY),link=normLink(pf.link);
+ if(link&&S.runs.some(r=>r.manual&&r.link&&r.link.toLowerCase()===link.toLowerCase()&&r.id!==pid)){toast('That link is already added');return}
+ let m=null;
+ if(age>=7&&MK.some(k=>String(pf.m[k]||'').trim()!=='')){
+  m={};MK.forEach(k=>{m[k]=num(pf.m[k]||'')});
+  ['likes','comments','reposts','views','tippers'].forEach(k=>{m[k]=Math.round(m[k])});m.at=Date.now();
+ }
+ if(pid){
+  const r=S.runs.find(r=>r.id===pid);if(!r){pf=null;pid=null;rReview();return}
+  r.task=pf.task;r.ts=pf.ts;r.link=link;r.note=pf.note.trim();r.old=!!pf.old;
+  if(age>=7){if(m)r.m=m;else delete r.m}
+  r.u=Date.now();
+ }else{
+  const r={id:uid(),ts:pf.ts,task:pf.task,outcome:'drafted',pushes:0,result:'approved',wrongSkip:false,memFail:false,note:pf.note.trim(),manual:true,link,old:!!pf.old,u:Date.now()};
+  if(m)r.m=m;S.runs.push(r);
+ }
+ const keep=(next&&!pid)?newPf(pf):null;
+ pf=keep;pid=null;save();toast('Saved');rReview();if(keep)window.scrollTo(0,0);
 }
 function mSummary(title,total,meas){
  const n=meas.length,t={};MK.forEach(k=>t[k]=meas.reduce((a,r)=>a+(r.m[k]||0),0));
@@ -342,7 +388,7 @@ function mSummary(title,total,meas){
  <p class="mut" style="margin:10px 0 0">Total ${f2(t.lyx)} LYX from ${t.tippers} tipper${t.tippers===1?'':'s'}${t.tippers?' · '+f2(t.lyx/t.tippers)+' LYX per tipper':''}</p>`:'<p class="mut" style="margin:8px 0 0">No numbers yet.</p>'}</div>`;
 }
 function baSummary(c){
- const W=14*DAY,pool=S.runs.filter(r=>!c.task||r.task===c.task);
+ const W=14*DAY,pool=S.runs.filter(r=>!r.manual&&(!c.task||r.task===c.task));
  const bef=pool.filter(r=>r.ts>=c.ts-W&&r.ts<c.ts),aft=pool.filter(r=>r.ts>=c.ts&&r.ts<=c.ts+W);
  const st=a=>({n:a.length,clean:a.length?Math.round(a.filter(isClean).length/a.length*100):0,push:a.length?Math.round(a.reduce((x,r)=>x+r.pushes,0)/a.length*10)/10:0});
  const b=st(bef),a=st(aft),pl=n=>n+' run'+(n===1?'':'s');
@@ -356,15 +402,19 @@ function rReview(){
  const young=all.filter(r=>!r.m&&ageD(r)<7).sort((a,b)=>b.ts-a.ts);
  const done=all.filter(r=>r.m).sort((a,b)=>b.ts-a.ts);
  const rb=[[7,'7d'],[14,'14d'],[30,'30d'],[0,'All']].map(([v,l])=>`<button class="${rw===v?'on':''}" data-a="rwin:${v}">${l}</button>`).join('');
- let h=`<div class="card">${freqBar()}<div class="seg">${rb}</div></div>`;
+ const hasOld=S.runs.some(r=>r.old);
+ const sb=[['all','All posts'],['cur','Current'],['old','Old setup']].map(([v,l])=>`<button class="${rs===v?'on':''}" data-a="rset:${v}">${l}</button>`).join('');
+ let h=`<div class="card">${freqBar()}<div class="seg">${rb}</div>${hasOld?`<div class="seg" style="margin-top:8px">${sb}</div>`:''}</div>`;
+ h+=pf?pForm():'<button class="primary" style="margin:0 0 4px" data-a="padd">Add post</button>';
  h+=hd('Due to measure ('+due.length+')');
  h+=due.length?due.map(mCard).join(''):'<div class="card mut">Nothing due. Posts show up here once they are 7 days old.</div>';
  if(young.length)h+=`<details><summary>Not 7 days old yet (${young.length})</summary>${young.map(mCard).join('')}</details>`;
  h+=hd('By task');
- const wAll=all.filter(inRw),wDone=done.filter(inRw);
+ const sOk=r=>rs==='all'||(rs==='old'?!!r.old:!r.old);
+ const wAll=all.filter(inRw).filter(sOk),wDone=done.filter(inRw).filter(sOk);
  h+=mSummary('All tasks',wAll.length,wDone);
  [...new Set(wAll.map(r=>r.task))].sort().forEach(n=>{h+=mSummary(n,wAll.filter(r=>r.task===n).length,wDone.filter(r=>r.task===n))});
- if(wDone.length)h+=`<details><summary>Measured posts (${wDone.length})</summary>${wDone.slice(0,15).map(mCard).join('')}${wDone.length>15?'<p class="mut">Showing the latest 15.</p>':''}</details>`;
+ if(wDone.length)h+=`<details ${ml>15?'open':''}><summary>Measured posts (${wDone.length})</summary>${wDone.slice(0,ml).map(mCard).join('')}${wDone.length>ml?`<p class="mut">Showing the latest ${ml} of ${wDone.length}.</p><button class="btn" data-a="mmore">Show 15 more</button>`:''}</details>`;
  h+=hd('Decisions and changes');
  h+=`<div class="card"><b>${cid?'Edit change':'Decision or change'}</b>
  <label>Task</label><select id="c-task"><option value="">General (all tasks)</option>${S.tasks.map(t=>`<option ${t.n===cf.task?'selected':''}>${esc(t.n)}</option>`).join('')}</select>
@@ -403,7 +453,7 @@ function tips(a){
  return t;
 }
 function rHealth(){
- const runs=S.runs.filter(inWin).filter(fOk),a=agg(runs);
+ const runs=S.runs.filter(r=>!r.manual).filter(inWin).filter(fOk),a=agg(runs);
  const winBtns=[[7,'7d'],[14,'14d'],[30,'30d'],[0,'All']].map(([v,l])=>`<button class="${win===v?'on':''}" data-a="win:${v}">${l}</button>`).join('');
  let h=`<div class="card">${freqBar()}<div class="seg">${winBtns}</div></div>
  <div class="stat"><div><b>${a.n}</b><span>runs</span></div><div><b>${a.n?Math.round(a.clean/a.n*100):0}%</b><span>clean</span></div><div><b>${a.pushes}</b><span>pushes</span></div></div>`;
@@ -429,9 +479,9 @@ function rHealth(){
  $('#app').innerHTML=h;
 }
 function rHistory(){
- const names=[...new Set(S.runs.filter(fOk).map(r=>r.task))].sort();
+ const names=[...new Set(S.runs.filter(r=>!r.manual).filter(fOk).map(r=>r.task))].sort();
  if(hf&&!names.includes(hf))hf='';
- const all=S.runs.filter(fOk).filter(r=>!hf||r.task===hf).sort((a,b)=>b.ts-a.ts);
+ const all=S.runs.filter(r=>!r.manual).filter(fOk).filter(r=>!hf||r.task===hf).sort((a,b)=>b.ts-a.ts);
  const pages=Math.max(1,Math.ceil(all.length/PER));hp=Math.min(Math.max(0,hp),pages-1);
  const rows=all.slice(hp*PER,hp*PER+PER);
  let h=`<div class="card">${freqBar()}<select id="hf" data-a="hfilter" style="width:100%;min-height:44px;background:#0f1218;color:var(--tx);border:1px solid var(--line);border-radius:10px;font-size:15px;padding:0 10px"><option value="">All tasks</option>${names.map(n=>`<option value="${esc(n)}"${n===hf?' selected':''}>${esc(n)}</option>`).join('')}</select></div>`;
@@ -474,6 +524,16 @@ document.addEventListener('click',e=>{
  if(a==='tab'){view=x;eid=null;mid=null;if(x==='history'){hp=0;hf=''}render()}
  else if(a==='freq'){ff=x==='all'?null:Number(x);hp=0;if(view==='health')rHealth();else if(view==='review')rReview();else rHistory()}
  else if(a==='rwin'){rw=Number(x);rReview()}
+ else if(a==='rset'){rs=x;rReview()}
+ else if(a==='mmore'){ml+=15;rReview()}
+ else if(a==='padd'){pf=newPf();pid=null;rReview()}
+ else if(a==='pcancel'){pf=null;pid=null;rReview()}
+ else if(a==='pold'){pf.old=(x==='1');rReview()}
+ else if(a==='psave')savePost(false);
+ else if(a==='pnext')savePost(true);
+ else if(a==='pedit'){const r=S.runs.find(r=>r.id===x);if(r){const m={};if(r.m)MK.forEach(k=>{m[k]=String(r.m[k]||0)});pf={task:r.task,ts:r.ts,link:r.link||'',note:r.note||'',old:!!r.old,m};pid=x;rReview();window.scrollTo(0,0)}}
+ else if(a==='pdel'){if(confirm('Delete this post?')){S.deleted[x]=Date.now();S.runs=S.runs.filter(r=>r.id!==x);if(pid===x){pf=null;pid=null}save();rReview()}}
+ else if(a==='mclear'){const r=S.runs.find(r=>r.id===x);if(r&&confirm('Clear the numbers for this post?')){delete r.m;r.u=Date.now();save();rReview()}}
  else if(a==='mopen'){mid=x;rReview()}
  else if(a==='mcancel'){mid=null;rReview()}
  else if(a==='msave'){
@@ -552,12 +612,17 @@ document.addEventListener('input',e=>{
  else if(id==='note')draft.note=e.target.value;
  else if(id==='e-note'&&ed)ed.note=e.target.value;
  else if(id==='c-text')cf.text=e.target.value;
+ else if(id==='p-link'&&pf)pf.link=e.target.value;
+ else if(id==='p-note'&&pf)pf.note=e.target.value;
+ else if(e.target.dataset&&e.target.dataset.pk&&pf)pf.m[e.target.dataset.pk]=e.target.value;
 });
 document.addEventListener('change',e=>{
  const id=e.target.id;
  if(id==='hf'){hf=e.target.value;hp=0;rHistory()}
  else if(id==='e-task'&&ed)ed.task=e.target.value;
  else if(id==='c-task')cf.task=e.target.value;
+ else if(id==='p-task'&&pf)pf.task=e.target.value;
+ else if(id==='p-when'&&pf){const t=new Date(e.target.value).getTime();if(!isNaN(t)){pf.ts=t;rReview()}}
  else if(id==='c-when'){const t=new Date(e.target.value).getTime();if(!isNaN(t))cf.ts=t}
  else if(id==='e-when'&&ed){const t=new Date(e.target.value).getTime();if(!isNaN(t))ed.ts=t}
  else if(id==='taskSel')draft.task=e.target.value;
