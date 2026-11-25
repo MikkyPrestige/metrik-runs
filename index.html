@@ -235,9 +235,9 @@ function classify(text){
 }
 
 /* ---------- state ---------- */
-let view='log',win=14,tm=null,hp=0,hf='',ff=null,eid=null,ed=null,rw=30,mid=null,cid=null,cf={task:'',text:'',ts:null},rs='all',ml=15,pf=null,pid=null;const PER=10;
+let view='log',win=14,tm=null,hp=0,hf='',ff=null,eid=null,ed=null,rw=30,mid=null,cid=null,cf={task:'',text:'',ts:null},rs='all',ml=15,pf=null,pid=null,le=null,lf={link:'',note:''};const PER=10;
 let draft=newDraft();
-function newDraft(){return{ts:Date.now(),task:'',outcome:'drafted',pushes:0,result:'pending',wrongSkip:false,memFail:false,note:'',text:'',guess:null,why:''}}
+function newDraft(){return{ts:Date.now(),task:'',outcome:'drafted',pushes:0,result:'pending',wrongSkip:false,memFail:false,note:'',link:'',text:'',guess:null,why:''}}
 function applyGuess(){
  if(!draft.text.trim()){draft.guess=null;draft.why='';return}
  const g=classify(draft.text);draft.guess=g;
@@ -293,6 +293,7 @@ function rPanel(){
  <label>Memory save failed?</label>${seg('memFail',[['false','No'],['true','Yes','bad']],String(draft.memFail))}
  <label>When</label><input type="datetime-local" id="when" value="${localVal(draft.ts)}">
  <label>Note (optional)</label><input id="note" value="${esc(draft.note)}" placeholder="e.g. ignored the 350 limit">
+ <label>Post link (optional, can be added later in Review)</label><input id="plink" value="${esc(draft.link||'')}" placeholder="hup.social/networks/42/12345" autocapitalize="none" autocorrect="off">
  <button class="primary" data-a="save">Save run</button></div>`;
 }
 const tdOf=n=>{const t=S.tasks.find(t=>t.n===n);return t?t.d:null};
@@ -317,6 +318,7 @@ function editCard(){
  <label>Memory save failed?</label>${segE('memFail',[['false','No'],['true','Yes','bad']],String(!!e.memFail))}
  <label>When</label><input type="datetime-local" id="e-when" value="${localVal(e.ts)}">
  <label>Note (optional)</label><input id="e-note" value="${esc(e.note||'')}">
+ <label>Post link (optional)</label><input id="e-link" value="${esc(e.link||'')}" placeholder="hup.social/networks/42/12345" autocapitalize="none" autocorrect="off">
  <div class="seg" style="margin-top:12px"><button class="primary" data-a="esave">Save changes</button><button class="btn" data-a="ecancel">Cancel</button></div></div>`;
 }
 /* ---------- review ---------- */
@@ -332,7 +334,11 @@ function mCard(r){
  const age=ageD(r);
  const tags=(r.manual?'<span class="chip">added by hand</span>':'')+(r.old?'<span class="chip warn">old setup</span>':'');
  const head=`<div class="row"><b>${esc(r.task)}</b><span class="mut">${fmt(r.ts)} · ${age}d old</span></div>${tags?`<div class="chips">${tags}</div>`:''}${r.link?`<div style="margin-top:6px;word-break:break-all"><a href="https://${esc(r.link)}" target="_blank" rel="noopener" style="color:var(--acc);font-size:14px">${esc(r.link)}</a></div>`:''}${r.note?`<p class="mut" style="margin:6px 0 0">${esc(r.note)}</p>`:''}`;
- const tools=r.manual?`<button class="x" data-a="pedit:${r.id}">Edit</button><button class="x" data-a="pdel:${r.id}">Delete</button>`:'';
+ if(!r.manual&&r.id===le)return `<div class="card"><div class="row"><b>${esc(r.task)}</b><span class="mut">${fmt(r.ts)} · ${age}d old</span></div>
+  <label>Post link</label><input id="l-link" value="${esc(lf.link)}" placeholder="hup.social/networks/42/12345" autocapitalize="none" autocorrect="off">
+  <label>Note</label><input id="l-note" value="${esc(lf.note)}">
+  <div class="seg" style="margin-top:12px"><button class="primary" style="margin-top:0;width:auto;flex:1" data-a="lsave">Save</button><button class="btn" data-a="lcancel">Cancel</button></div></div>`;
+ const tools=r.manual?`<button class="x" data-a="pedit:${r.id}">Edit</button><button class="x" data-a="pdel:${r.id}">Delete</button>`:`<button class="x" data-a="ledit:${r.id}">Edit</button>`;
  if(!r.m&&age<7){const d=7-age;return `<div class="card">${head}<p class="mut" style="margin:8px 0 0">Measured at 7 days. Due in ${d} day${d===1?'':'s'}.</p>${tools}</div>`}
  if(r.m&&r.id!==mid){const m=r.m;
   return `<div class="card">${head}<div class="chips"><span class="chip">${m.likes} likes</span><span class="chip">${m.comments} comments</span><span class="chip">${m.reposts} reposts</span><span class="chip">${m.views} views</span><span class="chip ${m.tippers?'ok':''}">${m.tippers} tipper${m.tippers===1?'':'s'} · ${f2(m.lyx)} LYX</span></div><button class="x" data-a="mopen:${r.id}">Update numbers</button><button class="x" data-a="mclear:${r.id}">Clear numbers</button>${tools}</div>`}
@@ -526,6 +532,9 @@ document.addEventListener('click',e=>{
  else if(a==='rwin'){rw=Number(x);rReview()}
  else if(a==='rset'){rs=x;rReview()}
  else if(a==='mmore'){ml+=15;rReview()}
+ else if(a==='ledit'){const r=S.runs.find(r=>r.id===x);if(r){le=x;lf={link:r.link||'',note:r.note||''};rReview()}}
+ else if(a==='lcancel'){le=null;rReview()}
+ else if(a==='lsave'){const r=S.runs.find(r=>r.id===le);if(r){const lk=normLink(lf.link);if(lk)r.link=lk;else delete r.link;r.note=lf.note.trim();r.u=Date.now();save()}le=null;toast('Saved');rReview()}
  else if(a==='padd'){pf=newPf();pid=null;rReview()}
  else if(a==='pcancel'){pf=null;pid=null;rReview()}
  else if(a==='pold'){pf.old=(x==='1');rReview()}
@@ -566,7 +575,7 @@ document.addEventListener('click',e=>{
   r.task=ed.task;r.outcome=ed.outcome;r.pushes=ed.pushes;
   r.result=ed.outcome==='drafted'?ed.result:'none';
   r.wrongSkip=ed.outcome==='skipped'&&!!ed.wrongSkip;r.memFail=!!ed.memFail;
-  r.ts=ed.ts;r.note=(ed.note||'').trim();r.u=Date.now();
+  r.ts=ed.ts;r.note=(ed.note||'').trim();{const lk=normLink(ed.link);if(lk)r.link=lk;else delete r.link}r.u=Date.now();
   eid=null;ed=null;save();toast('Saved');rHistory();
  }
  else if(a==='hpage'){hp+=Number(x);rHistory();window.scrollTo(0,0)}
@@ -610,8 +619,12 @@ document.addEventListener('input',e=>{
  const id=e.target.id;
  if(id==='paste'){clearTimeout(tm);tm=setTimeout(()=>{draft.text=e.target.value;applyGuess();rPanel()},350)}
  else if(id==='note')draft.note=e.target.value;
+ else if(id==='plink')draft.link=e.target.value;
  else if(id==='e-note'&&ed)ed.note=e.target.value;
+ else if(id==='e-link'&&ed)ed.link=e.target.value;
  else if(id==='c-text')cf.text=e.target.value;
+ else if(id==='l-link')lf.link=e.target.value;
+ else if(id==='l-note')lf.note=e.target.value;
  else if(id==='p-link'&&pf)pf.link=e.target.value;
  else if(id==='p-note'&&pf)pf.note=e.target.value;
  else if(e.target.dataset&&e.target.dataset.pk&&pf)pf.m[e.target.dataset.pk]=e.target.value;
@@ -648,6 +661,7 @@ function saveRun(){
  const r={id:uid(),ts:draft.ts,task:draft.task,outcome:draft.outcome,pushes:draft.pushes,
   result:draft.outcome==='drafted'?draft.result:'none',
   wrongSkip:draft.outcome==='skipped'&&draft.wrongSkip,memFail:draft.memFail,note:draft.note.trim()};
+ const lk=normLink(draft.link);if(lk)r.link=lk;
  if(corrected){r.corrected=true;r.text=draft.text.slice(0,600)}
  r.u=Date.now();S.runs.push(r);save();draft=newDraft();toast('Saved');render();
 }
