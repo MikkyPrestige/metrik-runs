@@ -21,6 +21,7 @@ textarea,input,select{width:100%;background:#0f1218;color:var(--tx);border:1px s
 textarea{min-height:130px;resize:vertical}
 .seg{display:flex;gap:6px;flex-wrap:wrap}
 .seg button,.btn{min-height:44px;padding:0 14px;border:1px solid var(--line);background:#0f1218;color:var(--tx);border-radius:10px;font-size:15px}
+.seg.fq button{padding:0 10px}
 .seg button.on{border-color:var(--acc);background:#1b2433}
 .seg button.on.ok{border-color:var(--ok);background:#12281f}
 .seg button.on.bad{border-color:var(--bad);background:#2b1717}
@@ -326,12 +327,12 @@ function rPanel(){
 }
 const tdOf=n=>{const t=S.tasks.find(t=>t.n===n);return t?t.d:null};
 const fOk=r=>ff===null||tdOf(r.task)===ff;
-const fLabel=d=>d===0?'Manual':d===1?'Daily':d===7?'Weekly':'Every '+d+' days';
+const fLabel=d=>d===0?'Manual':d===1?'Daily':d===7?'Weekly':d+' days';
 function freqBar(){
  if(ff!==null&&!S.tasks.some(t=>t.d===ff))ff=null;
  const ds=[...new Set(S.tasks.map(t=>t.d))].sort((a,b)=>(a||999)-(b||999));
  if(ds.length<2)return '';
- return '<div class="seg" style="margin-bottom:10px"><button class="'+(ff===null?'on':'')+'" data-a="freq:all">All</button>'+ds.map(d=>`<button class="${ff===d?'on':''}" data-a="freq:${d}">${fLabel(d)}</button>`).join('')+'</div>';
+ return '<div class="seg fq" style="margin-bottom:10px"><button class="'+(ff===null?'on':'')+'" data-a="freq:all">All</button>'+ds.map(d=>`<button class="${ff===d?'on':''}" data-a="freq:${d}">${fLabel(d)}</button>`).join('')+'</div>';
 }
 function segE(field,opts,val){return '<div class="seg">'+opts.map(([v,l,c])=>`<button class="${val===v?'on '+(c||''):''}" data-a="eset:${field}:${v}">${l}</button>`).join('')+'</div>'}
 function editCard(){
