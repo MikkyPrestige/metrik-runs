@@ -62,7 +62,7 @@ const T=iso=>new Date(iso).getTime();
 
 const DEFAULT_TASKS=[
  {n:'LUKSO Update',d:1},{n:'Hup this week',d:7},{n:'Reply to my notifications',d:1},{n:'Join conversation',d:0},
- {n:'Football weekly',d:7},{n:'Football hot topic',d:1},{n:'Big match special',d:0},
+ {n:'NFL daily',d:1},{n:'Football hot topic',d:1},{n:'Big match special',d:0},
  {n:'Community question',d:7},{n:'Creator spotlight',d:7},{n:'AI and science',d:0}
 ];
 
@@ -92,6 +92,16 @@ function load(){
 let S=load();
 S.deleted=S.deleted||{};S.tu=S.tu||0;S.changes=S.changes||[];
 if(!S.tasks.some(t=>t.n==='Join conversation')){S.tasks.splice(3,0,{n:'Join conversation',d:0})}
+function migrateTasks(){
+ const i=S.tasks.findIndex(t=>t.n==='Football weekly');
+ if(i<0)return false;
+ if(S.tasks.some(t=>t.n==='NFL daily'))S.tasks.splice(i,1);else S.tasks[i]={n:'NFL daily',d:1};
+ S.tu=Date.now();
+ const id='chg-nfl-daily';
+ if(!S.deleted[id]&&!S.changes.some(c=>c.id===id))S.changes.push({id,ts:new Date('2026-11-25T23:30:00+01:00').getTime(),task:'NFL daily',text:'Football weekly dropped after 3 failed runs. Replaced by NFL daily: results from Sky when it states a score, news from Pro Football Talk.',u:Date.now()});
+ return true;
+}
+migrateTasks();
 let editIdx=-1;
 function persist(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){toast('Browser storage blocked. Export a backup now.')}}
 function save(){persist();schedulePush()}
@@ -154,7 +164,7 @@ async function sync(){
    else if(g.status===403)throw new Error('Token lacks permission. Needs Contents: read and write');
    else throw new Error('GitHub error '+g.status);
    const before=JSON.stringify(payload(S));
-   if(remote){const m=mergeState(S,remote);S=Object.assign(S,m)}
+   if(remote){const m=mergeState(S,remote);S=Object.assign(S,m);migrateTasks()}
    const after=JSON.stringify(payload(S));
    if(after!==before)changedLocal=true;
    persist();
@@ -188,11 +198,12 @@ function toast(m){const t=document.createElement('div');t.className='toast';t.te
 /* ---------- classifier ---------- */
 const TASK_RULES=[
  ['Join conversation',/join(ed|ing)? (a |the )?(conversations?|threads?)|no repl(y|ies) (qualif|fit)|giveaways/],
+
+ ['NFL daily',/\bnfl\b|american football|super bowl|quarterback|touchdown|pro football talk/],
  ['Hup this week',/platform totals|root posts|nft feed|trending list|hup weekly/],
  ['LUKSO Update',/update #\d+|luksonews|lukso update|lyx is at|lyx price|read_prices/],
  ['Reply to my notifications',/comment|replied|reply to|notifications|propose_reply/],
  ['Big match special',/derby|cl[aá]sico|title clash|relegation|knockout/],
- ['Football weekly',/football weekly|weekly football|football this week|weekly recap|\brecap\b|(pick|picked|picking|named|choose)( the)?( final| first)? three|three (football )?stories/],
  ['Football hot topic',/bbc sport|sky sports|premier league|champions league|hot topic/],
  ['Community question',/community question/],
  ['Creator spotlight',/spotlight/],
@@ -228,7 +239,7 @@ function classify(text){
  if(me){g.memFail=true;why.push('memory: "'+me+'"')}
  // learn from runs the user corrected before
  const gs=grams(text);let best=0,hit=null;
- S.runs.forEach(r=>{if(r.corrected&&r.text){const j=jac(gs,grams(r.text));if(j>best){best=j;hit=r}}});
+ S.runs.forEach(r=>{if(r.corrected&&r.text&&S.tasks.some(t=>t.n===r.task)){const j=jac(gs,grams(r.text));if(j>best){best=j;hit=r}}});
  if(hit&&best>=0.45){g.task=hit.task;g.outcome=hit.outcome;g.pushes=hit.pushes>0?1:0;why.unshift('matches a run you corrected on '+new Date(hit.ts).toLocaleDateString())}
  g.why=why.join(' · ');
  return g;
@@ -424,7 +435,7 @@ function rReview(){
  h+=hd('Decisions and changes');
  h+=`<div class="card"><b>${cid?'Edit change':'Decision or change'}</b>
  <label>Task</label><select id="c-task"><option value="">General (all tasks)</option>${S.tasks.map(t=>`<option ${t.n===cf.task?'selected':''}>${esc(t.n)}</option>`).join('')}</select>
- <label>What I'm changing</label><input id="c-text" value="${esc(cf.text)}" placeholder="e.g. Football weekly: dropped the Guardian feed">
+ <label>What I'm changing</label><input id="c-text" value="${esc(cf.text)}" placeholder="e.g. NFL daily: results from Sky only">
  <label>When</label><input type="datetime-local" id="c-when" value="${localVal(cf.ts||Date.now())}">
  <button class="primary" data-a="csave">${cid?'Save change':'Log it'}</button>${cid?'<button class="x" data-a="ccancel">Cancel</button>':''}</div>`;
  [...S.changes].sort((a,b)=>b.ts-a.ts).forEach(c=>{
