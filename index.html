@@ -63,7 +63,7 @@ const T=iso=>new Date(iso).getTime();
 const DEFAULT_TASKS=[
  {n:'LUKSO Update',d:1},{n:'Hup this week',d:7},{n:'Reply to my notifications',d:1},{n:'Join conversation',d:0},
  {n:'NFL daily',d:1},{n:'Football hot topic',d:1},{n:'Big match special',d:0},
- {n:'Community question',d:7},{n:'Creator spotlight',d:7},{n:'AI and science',d:0}
+ {n:'Community question',d:7},{n:'Creator spotlight',d:7},{n:'Daily brief',d:0}
 ];
 
 function seed(){
@@ -92,14 +92,30 @@ function load(){
 let S=load();
 S.deleted=S.deleted||{};S.tu=S.tu||0;S.changes=S.changes||[];
 if(!S.tasks.some(t=>t.n==='Join conversation')){S.tasks.splice(3,0,{n:'Join conversation',d:0})}
-function migrateTasks(){
- const i=S.tasks.findIndex(t=>t.n==='Football weekly');
- if(i<0)return false;
- if(S.tasks.some(t=>t.n==='NFL daily'))S.tasks.splice(i,1);else S.tasks[i]={n:'NFL daily',d:1};
- S.tu=Date.now();
- const id='chg-nfl-daily';
- if(!S.deleted[id]&&!S.changes.some(c=>c.id===id))S.changes.push({id,ts:new Date('2026-11-25T23:30:00+01:00').getTime(),task:'NFL daily',text:'Football weekly dropped after 3 failed runs. Replaced by NFL daily: results from Sky when it states a score, news from Pro Football Talk.',u:Date.now()});
+function migrateRename(from,to){
+ const i=S.tasks.findIndex(t=>t.n===from);
+ const used=S.runs.some(r=>r.task===from)||S.changes.some(c=>c.task===from);
+ if(i<0&&!used)return false;
+ const now=Date.now();
+ if(i>=0){if(S.tasks.some(t=>t.n===to))S.tasks.splice(i,1);else S.tasks[i].n=to}
+ else if(!S.tasks.some(t=>t.n===to))S.tasks.push({n:to,d:0});
+ S.runs.forEach(r=>{if(r.task===from){r.task=to;r.u=now}});
+ S.changes.forEach(c=>{if(c.task===from){c.task=to;c.u=now}});
+ S.tu=now;
  return true;
+}
+function migrateTasks(){
+ let did=false;
+ const i=S.tasks.findIndex(t=>t.n==='Football weekly');
+ if(i>=0){
+  if(S.tasks.some(t=>t.n==='NFL daily'))S.tasks.splice(i,1);else S.tasks[i]={n:'NFL daily',d:1};
+  S.tu=Date.now();
+  const id='chg-nfl-daily';
+  if(!S.deleted[id]&&!S.changes.some(c=>c.id===id))S.changes.push({id,ts:new Date('2026-11-25T23:30:00+01:00').getTime(),task:'NFL daily',text:'Football weekly dropped after 3 failed runs. Replaced by NFL daily: results from Sky when it states a score, news from Pro Football Talk.',u:Date.now()});
+  did=true;
+ }
+ ['AI and science','AI and Science'].forEach(n=>{if(migrateRename(n,'Daily brief'))did=true});
+ return did;
 }
 migrateTasks();
 let editIdx=-1;
@@ -192,6 +208,7 @@ async function sync(){
 }
 function editIdx_open(){return typeof editIdx!=='undefined'&&editIdx>=0}
 window.addEventListener('online',()=>sync());
+document.addEventListener('toggle',e=>{if(e.target&&e.target.id==='cdet')cOpen=e.target.open},true);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&cfg)sync()});
 function toast(m){const t=document.createElement('div');t.className='toast';t.textContent=m;document.body.appendChild(t);setTimeout(()=>t.remove(),2200)}
 
@@ -207,7 +224,7 @@ const TASK_RULES=[
  ['Football hot topic',/bbc sport|sky sports|premier league|champions league|hot topic/],
  ['Community question',/community question/],
  ['Creator spotlight',/spotlight/],
- ['AI and science',/\bscience\b|\bai news\b/]
+ ['Daily brief',/\bscience\b|\bai news\b|daily brief|the verge|technology review|hugging face|bbc news/]
 ];
 const RX={
  draftNoPropose:/(haven'?t|have not|hasn'?t|not yet)\s+(yet\s+)?(drafted|proposed|sent|called propose)/,
@@ -246,7 +263,7 @@ function classify(text){
 }
 
 /* ---------- state ---------- */
-let view='log',win=14,tm=null,hp=0,hf='',ff=null,eid=null,ed=null,rw=30,mid=null,cid=null,cf={task:'',text:'',ts:null},rs='all',ml=15,pf=null,pid=null,le=null,lf={link:'',note:''};const PER=10;
+let view='log',win=14,tm=null,hp=0,hf='',ff=null,eid=null,ed=null,rw=30,mid=null,cid=null,cf={task:'',text:'',ts:null},rs='all',ml=15,cOpen=false,cl=5,pf=null,pid=null,le=null,lf={link:'',note:''};const PER=10;
 let draft=newDraft();
 function newDraft(){return{ts:Date.now(),task:'',outcome:'drafted',pushes:0,result:'pending',wrongSkip:false,memFail:false,note:'',link:'',text:'',guess:null,why:''}}
 function applyGuess(){
@@ -438,9 +455,15 @@ function rReview(){
  <label>What I'm changing</label><input id="c-text" value="${esc(cf.text)}" placeholder="e.g. NFL daily: results from Sky only">
  <label>When</label><input type="datetime-local" id="c-when" value="${localVal(cf.ts||Date.now())}">
  <button class="primary" data-a="csave">${cid?'Save change':'Log it'}</button>${cid?'<button class="x" data-a="ccancel">Cancel</button>':''}</div>`;
- [...S.changes].sort((a,b)=>b.ts-a.ts).forEach(c=>{
-  h+=`<div class="card"><div class="row"><b>${esc(c.task||'General')}</b><span class="mut">${fmt(c.ts)}</span></div><p style="margin:8px 0 0">${esc(c.text)}</p><p class="mut" style="margin:8px 0 0">${esc(baSummary(c))}</p><button class="x" data-a="cedit:${c.id}">Edit</button><button class="x" data-a="cdel:${c.id}">Delete</button></div>`;
- });
+ const cs=[...S.changes].sort((a,b)=>b.ts-a.ts);
+ if(cs.length){
+  h+=`<details id="cdet" ${cOpen||cid?'open':''}><summary>Logged changes (${cs.length})</summary>`;
+  cs.slice(0,cl).forEach(c=>{
+   h+=`<div class="card"><div class="row"><b>${esc(c.task||'General')}</b><span class="mut">${fmt(c.ts)}</span></div><p style="margin:8px 0 0">${esc(c.text)}</p><p class="mut" style="margin:8px 0 0">${esc(baSummary(c))}</p><button class="x" data-a="cedit:${c.id}">Edit</button><button class="x" data-a="cdel:${c.id}">Delete</button></div>`;
+  });
+  if(cs.length>cl)h+=`<p class="mut">Showing the latest ${cl} of ${cs.length}.</p><button class="btn" data-a="cmore">Show 10 more</button>`;
+  h+=`</details>`;
+ }else h+='<div class="card mut">No changes logged yet.</div>';
  $('#app').innerHTML=h;
 }
 
@@ -543,6 +566,7 @@ document.addEventListener('click',e=>{
  else if(a==='rwin'){rw=Number(x);rReview()}
  else if(a==='rset'){rs=x;rReview()}
  else if(a==='mmore'){ml+=15;rReview()}
+ else if(a==='cmore'){cl+=10;cOpen=true;rReview()}
  else if(a==='ledit'){const r=S.runs.find(r=>r.id===x);if(r){le=x;lf={link:r.link||'',note:r.note||''};rReview()}}
  else if(a==='lcancel'){le=null;rReview()}
  else if(a==='lsave'){const r=S.runs.find(r=>r.id===le);if(r){const lk=normLink(lf.link);if(lk)r.link=lk;else delete r.link;r.note=lf.note.trim();r.u=Date.now();save()}le=null;toast('Saved');rReview()}
@@ -568,7 +592,7 @@ document.addEventListener('click',e=>{
   const ts=cf.ts||Date.now();
   if(cid){const c=S.changes.find(c=>c.id===cid);if(c){c.task=cf.task;c.text=cf.text.trim();c.ts=ts;c.u=Date.now()}}
   else S.changes.push({id:uid(),ts,task:cf.task,text:cf.text.trim(),u:Date.now()});
-  cid=null;cf={task:'',text:'',ts:null};save();toast('Saved');rReview();
+  cid=null;cf={task:'',text:'',ts:null};cOpen=true;save();toast('Saved');rReview();
  }
  else if(a==='ccancel'){cid=null;cf={task:'',text:'',ts:null};rReview()}
  else if(a==='cedit'){const c=S.changes.find(c=>c.id===x);if(c){cid=x;cf={task:c.task||'',text:c.text,ts:c.ts};rReview();window.scrollTo(0,0)}}
